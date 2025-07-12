@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sx1262.hpp"
+#include "sx1262_interface.hpp"
 
 extern "C" 
 {

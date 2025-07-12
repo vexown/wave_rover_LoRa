@@ -1,0 +1,21 @@
+#ifndef SX1262_INTERFACE_H
+#define SX1262_INTERFACE_H
+
+/* SX1262 is a "LoRa Connect™ Long Range Low Power LoRa® Transceiver" by Semtech: https://www.semtech.com/products/wireless-rf/lora-connect/sx1262
+ * This header file provides the interface for initializing and interacting with the SX1262 module.
+ *
+ * Semtech is the sole owner and developer of the core LoRa modulation technology (physical layer) and 
+ * thus is the only company that manufactures the fundamental LoRa transceiver chips, like the SX1262. 
+ * Other companies do not independently create LoRa chips; instead, they either integrate Semtech's chips 
+ * into larger modules (like Heltec does) or license Semtech's LoRa IP to include it directly into their 
+ * own System-on-Chips (SoCs), as seen with STMicroelectronics' STM32WL series. The LoRaWAN protocol, built 
+ * on top of Semtech's LoRa technology, is, however, an open standard managed by the LoRa Alliance.
+ * 
+ * Datasheet: https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/RQ000008nKCH/hp2iKwMDKWl34g1D3LBf_zC7TGBRIo2ff5LMnS8r19s
+ * SX126x Driver: https://github.com/Lora-net/sx126x_driver 
+ * 
+ */
+
+void sx1262_init(void);
+
+#endif // SX1262_INTERFACE_H
