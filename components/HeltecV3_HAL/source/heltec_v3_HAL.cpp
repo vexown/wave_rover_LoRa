@@ -21,8 +21,40 @@ static const char* TAG = "HELTEC_SX126X_HAL";
 /* SPI configuration */
 #define SX126X_SPI_CLOCK_HZ 1000000  // 1 MHz
 
+/* Misc defines (to avoid magic numbers) */
+#define NOT_USED_PIN -1
+#define LOGIC_LEVEL_LOW 0
+#define LOGIC_LEVEL_HIGH 1
+#define SPI_MODE_0 0
+#define SPI_NO_BITS 0
+#define SPI_NO_DELAY 0
+#define SPI_NO_FLAGS 0
+#define SPI_DEFAULT_QUEUE_SIZE 1
+#define SPI_WAKEUP_LENGTH_BITS 8
+
 static spi_device_handle_t spi_handle = NULL;
 static bool hal_initialized = false;
+
+SemaphoreHandle_t dio1_sem = NULL;
+
+/**
+ * @brief ISR handler for DIO1 pin
+ * 
+ * @details The purpose of the DIO1 pin is to, for example, signal the completion of a transmission by the SX126x.
+ *          The DIO1 pin on the SX1262 LoRa chip (connected to ESP32-S3's GPIO14 on Heltec V3.1) is a configurable interrupt
+ *          line. It signals various events (e.g., TxDone, RxDone, Timeout) to the host microcontroller,
+ *          enabling efficient interrupt-driven communication instead of polling. For instance, an RxDone
+ *          interrupt on DIO1 indicates a successful packet reception, prompting the ESP32 to read the data.
+ */
+static void IRAM_ATTR sx126x_dio1_isr_handler(void* arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(dio1_sem, &xHigherPriorityTaskWoken);
+    if (xHigherPriorityTaskWoken)
+    {
+        portYIELD_FROM_ISR();
+    }
+}
 
 /**
  * @brief Initialize SPI and GPIO for SX126x communication
@@ -42,9 +74,19 @@ static esp_err_t sx126x_hal_init(void)
         .mosi_io_num = SX126X_MOSI_PIN,
         .miso_io_num = SX126X_MISO_PIN,
         .sclk_io_num = SX126X_SCK_PIN,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 256,
+        .quadwp_io_num = NOT_USED_PIN,
+        .quadhd_io_num = NOT_USED_PIN,
+        .data4_io_num = NOT_USED_PIN,
+        .data5_io_num = NOT_USED_PIN,
+        .data6_io_num = NOT_USED_PIN,
+        .data7_io_num = NOT_USED_PIN,
+        .data_io_default_level = LOGIC_LEVEL_LOW, // Default logic level for unused IO pins (not relevant in standard SPI mode)
+        .max_transfer_sz = 256, // max transfer size in bytes
+#if (ESP_IDF_VERSION_MAJOR >= 4)
+        .flags = SPI_NO_FLAGS,
+        .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO,
+        .intr_flags = SPI_NO_FLAGS,
+#endif
     };
 
     ret = spi_bus_initialize(SX126X_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
@@ -57,24 +99,27 @@ static esp_err_t sx126x_hal_init(void)
     /* #02 - Define the configuration for the SPI device and apply it */
     spi_device_interface_config_t devcfg = 
     {
-        .command_bits = 0,
-        .address_bits = 0,
-        .dummy_bits = 0,
-        .mode = 0,                      // SPI mode 0
-        .duty_cycle_pos = 0,
-        .cs_ena_pretrans = 0,
-        .cs_ena_posttrans = 0,
+        .command_bits = SPI_NO_BITS,
+        .address_bits = SPI_NO_BITS,
+        .dummy_bits = SPI_NO_BITS,
+        .mode = SPI_MODE_0,
+        .clock_source = SPI_CLK_SRC_DEFAULT,
+        .duty_cycle_pos = 0, // Usually 0
+        .cs_ena_pretrans = SPI_NO_DELAY,
+        .cs_ena_posttrans = SPI_NO_DELAY,
         .clock_speed_hz = SX126X_SPI_CLOCK_HZ,
-        .input_delay_ns = 0,
+        .input_delay_ns = SPI_NO_DELAY,
+        .sample_point = SPI_SAMPLING_POINT_PHASE_0,
         .spics_io_num = SX126X_NSS_PIN,
-        .flags = 0,
-        .queue_size = 1,
+        .flags = SPI_NO_FLAGS,
+        .queue_size = SPI_DEFAULT_QUEUE_SIZE,
         .pre_cb = NULL,
         .post_cb = NULL,
     };
 
     ret = spi_bus_add_device(SX126X_SPI_HOST, &devcfg, &spi_handle);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK) 
+    {
         ESP_LOGE(TAG, "Failed to add SPI device: %s", esp_err_to_name(ret));
         return ret;
     }
@@ -95,7 +140,25 @@ static esp_err_t sx126x_hal_init(void)
     gpio_config(&io_conf);
 
     io_conf.pin_bit_mask = (1ULL << SX126X_DIO1_PIN); // Configure DIO1 pin as input (for interrupts)
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_POSEDGE; // Trigger on rising edge for TX_DONE
     gpio_config(&io_conf);
+
+    /* Create a binary semaphore for signaling DIO1 interrupts */
+    if (dio1_sem == NULL) 
+    {
+        dio1_sem = xSemaphoreCreateBinary();
+    }
+
+    /* Install the global GPIO ISR service, which allows handlers to be registered for individual pins.
+     * The ESP_INTR_FLAG_SHARED flag indicates that this interrupt can be shared by multiple handlers,
+     * which is a robust way to prevent conflicts with other components that might also use GPIO interrupts. */
+    gpio_install_isr_service(ESP_INTR_FLAG_SHARED);
+    
+    /* Register the ISR handler for DIO1 pin */
+    gpio_isr_handler_add((gpio_num_t)SX126X_DIO1_PIN, sx126x_dio1_isr_handler, NULL);
 
     hal_initialized = true;
     ESP_LOGI(TAG, "SX126x HAL initialized successfully");
@@ -121,7 +184,17 @@ sx126x_hal_status_t sx126x_hal_write(const void* context, const uint8_t* command
 {
     (void)context; // Unused parameter (TODO - find out if we need this)
     esp_err_t ret;
-    spi_transaction_t trans = {0};
+    spi_transaction_t trans = 
+    {
+        .flags = SPI_NO_FLAGS,
+        .cmd = 0, 
+        .addr = 0, 
+        .length = 0,
+        .rxlength = 0,
+        .user = NULL,
+        .tx_buffer = NULL,
+        .rx_buffer = NULL
+    };
 
     /* #01 - Make sure the HAL is initialized and not busy */
     if (sx126x_hal_init() != ESP_OK) 
@@ -168,7 +241,17 @@ sx126x_hal_status_t sx126x_hal_read(const void* context, const uint8_t* command,
 {
     (void)context; // Unused parameter (TODO - find out if we need this)
     esp_err_t ret;
-    spi_transaction_t trans = {0};
+    spi_transaction_t trans = 
+    {
+        .flags = SPI_NO_FLAGS,
+        .cmd = 0, 
+        .addr = 0,
+        .length = 0,
+        .rxlength = 0,
+        .user = NULL,
+        .tx_buffer = NULL,
+        .rx_buffer = NULL
+    };
 
     /* #01 - Make sure the HAL is initialized and not busy */
     if (sx126x_hal_init() != ESP_OK) 
@@ -283,7 +366,8 @@ sx126x_hal_status_t sx126x_hal_wakeup(const void* context)
      * safest option, guaranteed to have no side effects if the chip is already awake */
     uint8_t nop_cmd = SX126X_NOP;
 
-    spi_transaction_t trans = {0};
+    spi_transaction_t trans;
+    trans.cmd = 0; // No command bits
     trans.length = 8; // 1 byte
     trans.tx_buffer = &nop_cmd;
     trans.rx_buffer = NULL;
