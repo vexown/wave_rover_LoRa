@@ -16,6 +16,9 @@
  * 
  */
 
-void sx1262_init(void);
+#include "sx126x.h"
+
+
+sx126x_status_t sx1262_init_lora(void);
 
 #endif // SX1262_INTERFACE_H
