@@ -366,7 +366,7 @@ sx126x_hal_status_t sx126x_hal_wakeup(const void* context)
      * safest option, guaranteed to have no side effects if the chip is already awake */
     uint8_t nop_cmd = SX126X_NOP;
 
-    spi_transaction_t trans;
+    spi_transaction_t trans = {};
     trans.cmd = 0; // No command bits
     trans.length = 8; // 1 byte
     trans.tx_buffer = &nop_cmd;
