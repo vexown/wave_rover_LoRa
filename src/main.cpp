@@ -5,10 +5,13 @@
 #include "esp_log.h"
 #include "sx126x.h"
 #include <string.h>
+#include "sx1262_interface.hpp"
 
 extern SemaphoreHandle_t dio1_sem;
 
 static const char* TAG = "SX1262_TEST";
+
+static const void* context = NULL; // Context is not used in the HAL, so it can remain NULL.
 
 extern "C"
 {
@@ -18,119 +21,11 @@ extern "C"
 // Simple test function to demonstrate SX1262 basic functionality
 void sx1262_basic_test()
 {
-    ESP_LOGI(TAG, "Starting SX1262 basic test...");
-
-    // The context pointer is not used in your HAL, so it can remain NULL.
-    const void* context = NULL;
     sx126x_status_t status;
 
-    // The HAL will be initialized automatically by the first call to a HAL function (e.g., sx126x_reset).
-    // The following initialization sequence is based on the Semtech driver recommendations.
+    ESP_LOGI(TAG, "Initializing SX1262...");
+    status = sx1262_init_lora();
 
-    // Step 1: Reset and wake up the radio
-    ESP_LOGI(TAG, "Resetting SX1262...");
-    status = sx126x_reset(context);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Reset failed: %d", status);
-        return;
-    }
-    // A small delay after reset is good practice.
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    // The wakeup command is implicitly handled by the HAL during the first SPI transaction after reset.
-    // An explicit wakeup call is good for clarity and ensures the chip is ready.
-    status = sx126x_wakeup(context);
-     if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Wakeup failed: %d", status);
-        return;
-    }
-
-    // Step 2: Set to standby mode
-    ESP_LOGI(TAG, "Setting standby mode...");
-    status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set standby failed: %d", status);
-        return;
-    }
-
-    // Step 3: Configure regulator and RF switch
-    ESP_LOGI(TAG, "Configuring regulator...");
-    status = sx126x_set_reg_mode(context, SX126X_REG_MODE_DCDC);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set regulator failed: %d", status);
-        return;
-    }
-
-    // Step 3.1: Configure and enable the TCXO
-    ESP_LOGI(TAG, "Configuring TCXO...");
-    // The timeout is given in RTC steps. 1 step = 15.625 µs.
-    // 10ms timeout = 10000 / 15.625 = 640 steps.
-    status = sx126x_set_dio3_as_tcxo_ctrl(context, SX126X_TCXO_CTRL_1_8V, 640);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set TCXO control failed: %d", status);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Configuring DIO2 as RF switch...");
-    status = sx126x_set_dio2_as_rf_sw_ctrl(context, true);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set DIO2 RF switch failed: %d", status);
-        return;
-    }
-
-    // Step 4: Set packet type to LoRa
-    ESP_LOGI(TAG, "Setting LoRa packet type...");
-    status = sx126x_set_pkt_type(context, SX126X_PKT_TYPE_LORA);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set packet type failed: %d", status);
-        return;
-    }
-
-    // Step 5: Set RF frequency
-    ESP_LOGI(TAG, "Setting RF frequency to 868 MHz...");
-    uint32_t freq_in_hz = 868000000;
-    status = sx126x_set_rf_freq(context, freq_in_hz);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set RF frequency failed: %d", status);
-        return;
-    }
-
-    // Step 6: Configure PA and TX power for +14 dBm (a robust choice)
-    ESP_LOGI(TAG, "Configuring PA for +14 dBm...");
-    sx126x_pa_cfg_params_t pa_config = {
-        .pa_duty_cycle = 0x02, // Recommended value for +14 dBm
-        .hp_max = 0x02,        // Recommended value for +14 dBm
-        .device_sel = 0x00,    // 0x00 for SX1262
-        .pa_lut = 0x01
-    };
-    status = sx126x_set_pa_cfg(context, &pa_config);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set PA config failed: %d", status);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Setting TX power to +14 dBm...");
-    status = sx126x_set_tx_params(context, 14, SX126X_RAMP_200_US);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set TX params failed: %d", status);
-        return;
-    }
-
-    // Step 7: Configure LoRa modulation parameters
-    ESP_LOGI(TAG, "Configuring LoRa modulation...");
-    sx126x_mod_params_lora_t lora_mod_params = {
-        .sf = SX126X_LORA_SF7,
-        .bw = SX126X_LORA_BW_125,
-        .cr = SX126X_LORA_CR_4_5,
-        .ldro = 0
-    };
-    status = sx126x_set_lora_mod_params(context, &lora_mod_params);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set LoRa modulation failed: %d", status);
-        return;
-    }
-
-    // Step 8: Configure LoRa packet parameters
     ESP_LOGI(TAG, "Configuring LoRa packet parameters...");
     const char* test_message = "Hello from SX1262!";
     uint8_t payload_len = strlen(test_message);
@@ -148,13 +43,7 @@ void sx1262_basic_test()
         return;
     }
 
-    // Step 9: Configure DIO1 for TX done interrupt
-    ESP_LOGI(TAG, "Configuring IRQ for TX Done...");
-    status = sx126x_set_dio_irq_params(context, SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT, SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT, 0, 0);
-    if (status != SX126X_STATUS_OK) {
-        ESP_LOGE(TAG, "Set DIO IRQ params failed: %d", status);
-        return;
-    }
+
 
     // Main loop for sending packets
     int packet_count = 0;
