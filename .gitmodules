@@ -1,3 +1,9 @@
 [submodule "components/SX1262_Driver/sx126x_driver"]
 	path = components/SX1262_Driver/sx126x_driver
 	url = https://github.com/Lora-net/sx126x_driver
+[submodule "SDR/liquid-dsp"]
+	path = SDR/liquid-dsp
+	url = https://github.com/jgaeddert/liquid-dsp.git
+[submodule "SDR/gr-lora"]
+	path = SDR/gr-lora
+	url = https://github.com/rpp0/gr-lora.git
