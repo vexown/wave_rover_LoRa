@@ -18,6 +18,7 @@
 #    3. Run this very script to open up the GNU Radio Companion flowgraph and replace the
 #       .wav file in the Wav File Source block with your recorded file and adjust the settings
 #       as needed (especially your LoRa parameters in the LoRa Receiver block).
+#       - Side note - keep the Central Frequency in LoRa Receiver block as 0 and not as your LoRa frequency.
 #    4. Run the flowgraph. You should see:
 #       - The LoRa packets being decoded and printed in the console.
 #       - The waveform visualized by the Qt GUI block.
