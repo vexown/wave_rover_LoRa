@@ -248,10 +248,14 @@ sx126x_status_t sx1262_init_lora(void)
      *          - DIO3: Controls external TCXO supply voltage.
      *          - DIO2: Controls an external RF switch for TX/RX signal routing.
      * 
-     * DIO1 is used for various interrupts, including RX Done, TX Done, and other events.
-     * Here we configure it to trigger on TX events only for now (TODO - add other events if needed) */
-    ESP_LOGI(TAG, "Configuring IRQ for TX Done...");
-    status = sx126x_set_dio_irq_params(context, SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT, SX126X_IRQ_TX_DONE | SX126X_IRQ_TIMEOUT, 0, 0);
+     * DIO1 is used for various interrupts, including RX Done, TX Done, and other events. */
+    ESP_LOGI(TAG, "Configuring IRQs...");
+    status = sx126x_set_dio_irq_params( context,
+                                        SX126X_IRQ_TX_DONE | SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR | SX126X_IRQ_HEADER_ERROR,
+                                        SX126X_IRQ_TX_DONE | SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR | SX126X_IRQ_HEADER_ERROR,
+                                        0,
+                                        0
+                                    );
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set DIO IRQ params failed: %d", status);
