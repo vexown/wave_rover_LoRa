@@ -131,6 +131,46 @@ void sx1262_basic_test()
         // Return to standby after transmission
         sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
 
+        // --- Reception ---
+        ESP_LOGI(TAG, "Switching to receive mode...");
+        status = sx126x_set_rx(context, 5000); // 5 second RX timeout
+        if (status != SX126X_STATUS_OK) {
+            ESP_LOGE(TAG, "Set RX failed: %d", status);
+        } else {
+            // Wait for RX Done or Timeout
+            bool rx_completed = false;
+            if (xSemaphoreTake(dio1_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
+                sx126x_irq_mask_t irq_status;
+                status = sx126x_get_and_clear_irq_status(context, &irq_status);
+                if (status == SX126X_STATUS_OK) {
+                    if (irq_status & SX126X_IRQ_RX_DONE) {
+                        ESP_LOGI(TAG, "✅ Reception completed successfully!");
+                        rx_completed = true;
+                        // Read received buffer status
+                        sx126x_rx_buffer_status_t rx_status;
+                        status = sx126x_get_rx_buffer_status(context, &rx_status);
+                        if (status == SX126X_STATUS_OK && rx_status.pld_len_in_bytes > 0) {
+                            uint8_t rx_buf[256] = {0};
+                            status = sx126x_read_buffer(context, rx_status.buffer_start_pointer, rx_buf, rx_status.pld_len_in_bytes);
+                            if (status == SX126X_STATUS_OK) {
+                                ESP_LOGI(TAG, "Received: %.*s", rx_status.pld_len_in_bytes, rx_buf);
+                            }
+                        }
+                    }
+                    if (irq_status & SX126X_IRQ_TIMEOUT) {
+                        ESP_LOGW(TAG, "⚠️ Reception timeout IRQ!");
+                        rx_completed = true;
+                    }
+                }
+            }
+            if (!rx_completed) {
+                ESP_LOGW(TAG, "No RX completion IRQ detected after 5 seconds.");
+            }
+        }
+
+        // Return to standby after reception
+        sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
+
         ESP_LOGI(TAG, "Waiting 5 seconds before next transmission...");
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
