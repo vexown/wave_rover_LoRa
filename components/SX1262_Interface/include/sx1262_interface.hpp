@@ -18,7 +18,15 @@
 
 #include "sx126x.h"
 
-
+/**
+ * @brief Initialize the SX1262 LoRa transceiver with default settings.
+ *
+ * This function configures the SX1262 chip for LoRa operation, including
+ * setting up the radio parameters and hardware interface. It must be called
+ * before any other SX1262 LoRa operations.
+ *
+ * @return SX126X_STATUS_OK on success, or an appropriate error code from sx126x_status_t on failure.
+ */
 sx126x_status_t sx1262_init_lora(void);
 
 #endif // SX1262_INTERFACE_H
