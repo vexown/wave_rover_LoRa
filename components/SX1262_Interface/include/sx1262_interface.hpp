@@ -29,4 +29,8 @@
  */
 sx126x_status_t sx1262_init_lora(void);
 
+sx126x_status_t sx1262_send_packet(void);
+
+sx126x_status_t sx1262_receive_packet(void);
+
 #endif // SX1262_INTERFACE_H
