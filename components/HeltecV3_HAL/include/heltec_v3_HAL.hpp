@@ -1,6 +1,9 @@
 #ifndef HELTECV3_HAL_H
 #define HELTECV3_HAL_H
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
 /* Heltec V3 is developlment board with SX1262 LoRa module and a ESP32S3 MCU: https://heltec.org/project/wifi-lora-32-v3/
  * This HAL provides an interface to interact with the board's hardware without worrying about the underlying implementation details.
  *
@@ -10,6 +13,8 @@
  * More resources:   https://resource.heltec.cn/download/WiFi_LoRa_32_V3/
  */
 
+/* Semaphore for signaling DIO1 interrupts */
+extern SemaphoreHandle_t dio1_sem;
 
 
 #endif // HELTECV3_HAL_H
