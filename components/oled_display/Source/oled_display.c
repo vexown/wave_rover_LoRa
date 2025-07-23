@@ -418,6 +418,40 @@ void oled_write_string(uint8_t line, const char *text)
     }
 }
 
+void oled_write_string_multiline(uint8_t start_line, const char *text)
+{
+    uint8_t line = start_line;
+    int x = 0;
+    int y = line * FONT_HEIGHT;
+
+    while (*text && line < SSD1306_128x64_NUM_OF_LINES) 
+    {
+        if (x == 0) // Start a new line if at the beginning and clear it before writing
+        {
+            int page_start = y / SSD1306_PAGE_HEIGHT;
+            int page_end = (y + (FONT_HEIGHT - 1)) / SSD1306_PAGE_HEIGHT;
+            for (int page = page_start; ((page <= page_end) && (page < SSD1306_128x64_NUM_OF_PAGES)); page++) 
+            {
+                uint16_t start_idx = SSD1306_PAGE_START_INDEX(page);
+                size_t clear_len = OLED_WIDTH;
+                assert(start_idx + clear_len <= sizeof(oled_buffer));
+                memset(&oled_buffer[start_idx], 0, clear_len);
+            }
+        }
+
+        oled_draw_char(x, y, *text);
+        x += FONT_WIDTH;
+
+        if (x + FONT_WIDTH > OLED_WIDTH) // If end of line, wrap to next line
+        {
+            x = 0;
+            line++;
+            y = line * FONT_HEIGHT;
+        }
+        text++;
+    }
+}
+
 /*******************************************************************************/
 /*                     STATIC FUNCTION DEFINITIONS                             */
 /*******************************************************************************/

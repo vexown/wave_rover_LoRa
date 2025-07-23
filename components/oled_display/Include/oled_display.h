@@ -78,6 +78,17 @@ void oled_clear_buffer(void);
 void oled_write_string(uint8_t line, const char *text);
 
 /**
+ * @brief Write a multiline string to the OLED display buffer.
+ *
+ * This function will write the string starting from the specified line, wrapping to the next line if necessary.
+ * It will clear the buffer for the lines that are used by this string.
+ *
+ * @param start_line The line number to start writing (0 to (SSD1306_128x64_NUM_OF_LINES - 1)).
+ * @param text The null-terminated string to write.
+ */
+void oled_write_string_multiline(uint8_t start_line, const char *text);
+
+/**
  * @brief Refresh the physical OLED display with the content of the buffer.
  *
  * @return esp_err_t ESP_OK on success, or an error code on failure.
