@@ -36,6 +36,13 @@ void sx1262_basic_test()
         {
             ESP_LOGE(TAG, "Failed to send packet: %d", status);
         } 
+        else
+        {
+            oled_clear_buffer();
+            oled_write_string(0, "Sent:");
+            oled_write_string_multiline(1, message);
+            oled_refresh();
+        }
 
         uint8_t rx_payload[256] = {}; // Buffer for received data
         uint16_t rx_payload_len = sizeof(rx_payload);
@@ -44,6 +51,15 @@ void sx1262_basic_test()
         {
             ESP_LOGE(TAG, "Failed to receive packet: %d", status);
         } 
+        else
+        {
+            oled_clear_buffer();
+            oled_write_string(0, "Received:");
+            oled_write_string_multiline(1, (char*)rx_payload);
+            oled_refresh();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2000)); // Wait 2 seconds before next iteration
     }
 }
 
