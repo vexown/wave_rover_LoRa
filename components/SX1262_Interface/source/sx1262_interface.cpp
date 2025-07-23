@@ -1,6 +1,9 @@
 #include <stdio.h>
-#include "sx1262_interface.hpp"
 #include "esp_log.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include "sx1262_interface.hpp"
+#include "heltec_v3_HAL.hpp"
 
 #define RTC_10_MS_TIMEOUT_IN_STEPS 640 // 10 ms in RTC steps (64 kHz clock, 1 step = 15.625 µs)
 
@@ -12,9 +15,19 @@
 #define HP_MAX_22DBM_SX1262         0x07 
 #define TX_POWER_SX1262_DB          22
 
+/* LoRa Packet Configuration */
+/* Per SX1262 datasheet, Semtech declares 1% PER (Packet Error Rate) with the following settings:
+ * LoRa PER = 1%, packet 64 bytes, preamble 8 symbols, CR = 4/5, CRC on payload enabled, explicit header mode 
+ *
+ * Essentially, it means: if you send a packet with the above parameters you can expect 99 out of 100 packets to arrive without errors.*/
+#define PREAMBLE_LENGTH_8_SYMBOLS   (uint16_t)(8)
+
 /* Misc defines */
 #define LDRO_ENABLED            0x01
 #define LDRO_DISABLED           0x00
+#define TIMEOUT_DISABLED        0x00
+#define MAX_LORA_PAYLOAD_LENGTH 255 // Maximum payload length for LoRa packets (uint8_t)
+#define RX_CONTINOUS_MODE       0xFFFFFFFF
 
 /* ETSI EN 300 220-2 V3.3.1 (2025-01) defines the frequency bands and power limits for "short-range" (more like low-power) (SRD) 
  * sub 1GHz (25MHz - 1000MHz) up to 500mW e.r.p RF devices in Europe (see Annex B for details):
@@ -263,4 +276,289 @@ sx126x_status_t sx1262_init_lora(void)
     }
 
     return status; // This will return success, otherwise the function would've returned earlier with an error status.
+}
+
+
+sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
+{
+    sx126x_status_t status;
+    sx126x_pkt_params_lora_t lora_packet_cfg;
+
+    /* #01 - Define the configuration for the LoRa packet and apply it */
+    ESP_LOGI(TAG, "Configuring LoRa packet parameters...");
+    /* Set general LoRa packet configuraton*/
+    lora_packet_cfg.preamble_len_in_symb = PREAMBLE_LENGTH_8_SYMBOLS;
+    lora_packet_cfg.header_type = SX126X_LORA_PKT_EXPLICIT;
+    lora_packet_cfg.pld_len_in_bytes = payload_length;
+    lora_packet_cfg.crc_is_on = true;
+    /* I/Q config */
+    /* ## What is the point of I/Q signaling?
+    *
+    * Transmitting data by directly manipulating a high-frequency radio carrier is complex and inefficient.
+    * I/Q signaling provides a much smarter way to modulate a carrier wave.
+    *
+    * The core idea is to represent any signal in terms of two simpler, lower-frequency (baseband) signals:
+    * (baseband refers to the original range of frequencies occupied by a signal before it's modulated onto 
+    * a higher frequency carrier for transmission over long distances or wireless channels.)
+    * In-phase (I) and Quadrature (Q). Any signal s(t) can be described by its amplitude A(t) and phase phi(t)
+    * relative to a carrier frequency f_c. In plain text, the formula is:
+    *
+    * s(t) = A(t) * cos(2*pi*f_c*t + phi(t))
+    *
+    * Using trigonometric identities, this can be rewritten into the I/Q form, which is what modulators actually implement:
+    *
+    * s(t) = I(t) * cos(2*pi*f_c*t) - Q(t) * sin(2*pi*f_c*t)
+    *
+    * Where the baseband I(t) and Q(t) signals are defined by the signal's overall amplitude and phase:
+    *
+    * I(t) = A(t) * cos(phi(t))  // The In-phase component
+    * Q(t) = A(t) * sin(phi(t))  // The Quadrature component
+    *
+    * This shows that by simply generating two baseband signals, I(t) and Q(t), and mixing them with cosine and sine
+    * versions of the carrier, we can create any form of modulation (AM, FM, PM, QAM, etc.). This simplifies hardware
+    * design immensely and provides a universal method for modulation.
+    *
+    * ---
+    *
+    * ## How LoRa Uses I/Q
+    *
+    * LoRa modulation uses I (In-phase) and Q (Quadrature) components to generate the chirps (the signals that sweep
+    * up or down in frequency) which encode the data.
+    *
+    * 1.  Carrier Generation: A single high-frequency carrier signal is generated. This carrier is then split into two identical signals.
+    * 2.  Phase Shift: One of these carrier signals is phase-shifted by 90 degrees. This creates two orthogonal carriers. By convention,
+    *     the original is the IN-PHASE (I) CARRIER (cosine) and the shifted one is the QUADRATURE (Q) CARRIER (sine). They are in quadrature
+    *     because they are 90 degrees out of phase.
+    * 3.  Baseband Signals: The baseband I and Q signals for LoRa are sinusoids whose frequency determines the chirp rate.
+    * 4.  Mixing: The baseband 'I' signal is multiplied (mixed) with the in-phase carrier (cosine wave). The baseband 'Q' signal is multiplied with
+    *     the quadrature carrier (sine wave).
+    * 5.  Summation: The two resulting signals are added together. This sum forms the final LoRa signal, which is a chirp.
+    *
+    * The power of this approach is that any form of modulation can be performed simply by varying the amplitude and phase of the baseband I and Q 
+    * signals before mixing and summation. For example, to create a phase shift in the final signal, you just need to change the relative amplitudes 
+    * of the I and Q signals.
+    *
+    * A classic example is Quadrature Phase-Shift Keying (QPSK). If the I and Q data streams are bipolar (e.g., +1V or -1V), we can create four distinct states:
+    *
+    * - I positive, Q positive
+    * - I positive, Q negative
+    * - I negative, Q positive
+    * - I negative, Q negative
+    *
+    * When summed, these four I/Q states produce four unique phase shifts (e.g., 45°, 135°, 225°, 315°), allowing 2 bits of data to be sent per symbol. While LoRa is not QPSK, the underlying I/Q principle is the same.
+    *
+    * ---
+    *
+    * ## Why does LoRa need to configure IQ inversion?
+    *
+    * In LoRa, the standard chirp is an UP-CHIRP, where frequency increases over the symbol time. This is generated with a standard I/Q signal pair.
+    *
+    * By inverting the Q component of the baseband signal, the direction of phase rotation is reversed, which in turn flips the frequency sweep. 
+    * This creates a DOWN-CHIRP, where frequency decreases over the symbol time.
+    *
+    * This inversion is critical for network operation, primarily to distinguish between data traffic directions:
+    *
+    * - UPLINK (Device to Gateway): Typically uses standard, non-inverted I/Q to produce UP-CHIRPS.
+    * - DOWNLINK (Gateway to Device): Typically uses inverted I/Q to produce DOWN-CHIRPS.
+    *
+    * A receiver must know what kind of chirp to listen for. If a gateway is expecting an uplink packet (UP-CHIRPS), its radio must be configured 
+    * to detect UP-CHIRPS. When that same gateway transmits a downlink response, it switches its configuration to send DOWN-CHIRPS.
+    *
+    * Therefore, a receiver MUST be configured with the SAME IQ setting as the transmitter it is listening to. If the settings mismatch 
+    * (e.g., Rx expects UP-CHIRPS but Tx sends DOWN-CHIRPS), the packet will not be detected.
+    *
+    * The `invert_iq_is_on` flag controls this behavior.
+    * - `false`: Use standard I/Q. For a transmitter, this generates UP-CHIRPS. For a receiver, this listens for UP-CHIRPS. (Typical for LoRaWAN uplinks).
+    * - `true`: Use inverted I/Q. For a transmitter, this generates DOWN-CHIRPS. For a receiver, this listens for DOWN-CHIRPS. (Typical for LoRaWAN downlinks).
+    */
+    lora_packet_cfg.invert_iq_is_on = false; // Configure for standard IQ (e.g., for transmitting an uplink)
+  
+    status = sx126x_set_lora_pkt_params(context, &lora_packet_cfg);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set LoRa packet params failed: %d", status);
+        return status;
+    }
+
+    /* #02 - Write the payload to the radio TX buffer */
+    ESP_LOGI(TAG, "Payload length: %u", payload_length);
+    ESP_LOG_BUFFER_HEX(TAG, payload, payload_length);
+
+    status = sx126x_write_buffer(context, 0x00, payload, payload_length);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Write buffer failed: %d", status);
+        return status;
+    }
+
+    /* #03 - Clear any pending IRQs (so we know any new IRQs are fresh) */
+    status = sx126x_clear_irq_status(context, SX126X_IRQ_ALL);  
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Clear IRQ failed: %d", status);
+    }
+
+    /* #04 - Send the packet by setting the radio to transmit mode */
+    /* The transmit flow based on SX1262 datasheet (SetTx command description):
+     * - Starting from STDBY_RC mode, the oscillator is switched ON followed by the PLL, then the PA is switched ON and
+     *   the PA regulator starts ramping according to the ramping time defined by the command SetTxParams(...).
+     * - When the ramping is completed, the packet handler starts the packet transmission.
+     * - When the last bit of the packet has been sent, an IRQ TX_DONE is generated,
+     *   the PA regulator is ramped down, the PA is switched OFF and the chip goes back to STDBY_RC mode.
+     * - A TIMEOUT IRQ is triggered if the TX_DONE IRQ is not generated within the given timeout period.
+     * - The chip goes back to STBY_RC mode after a TIMEOUT IRQ or a TX_DONE IRQ.
+     */
+    ESP_LOGI(TAG, "Starting transmission...");
+    /* The timeout arg acts as a 'safety watchdog' and should be set to a value bit longer than the expected Time-on-Air (ToA) of your LoRa packet. 
+     * - If for some reason the LoRa transmission does not complete within this specified time the SX1262 will automatically stop transmitting and 
+     * return to standby mode.
+     * - If set to 0 - timeout is disabled and the device stays in TX Mode until the packet is transmitted and returns in STBY_RC mode upon completion.
+     * The value given for the timeout should be calculated for a given packet size, given modulation and packet parameters.
+     */
+    const uint32_t tx_timeout_ms = 8000; // 8s seems long enough for most LoRa packets. For ToA visit Semtech's LoRa calculator: https://www.semtech.com/design-support/lora-calculator
+    status = sx126x_set_tx(context, tx_timeout_ms);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set TX failed: %d", status);
+        return status;
+    }
+
+    /* #05 - Wait for the transmission to complete which will be signaled by TX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
+    bool tx_success = false;
+    if (xSemaphoreTake(dio1_sem, pdMS_TO_TICKS(tx_timeout_ms + 1000)) == pdTRUE) 
+    {
+        sx126x_irq_mask_t irq_status;
+        status = sx126x_get_and_clear_irq_status(context, &irq_status);
+        if (status == SX126X_STATUS_OK) 
+        {
+            if (irq_status & SX126X_IRQ_TX_DONE) 
+            {
+                ESP_LOGI(TAG, "Transmission completed successfully!");
+                tx_success = true;
+            }
+            else if (irq_status & SX126X_IRQ_TIMEOUT) 
+            {
+                ESP_LOGW(TAG, "Transmission timeout IRQ!");
+            }
+        }
+    }
+    else 
+    {
+        ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for TX_DONE or TIMEOUT - check your interrupt configuration!");
+    }
+
+    /* #06 - If transmission was not successful, check for errors reported by the radio */
+    if (!tx_success) 
+    {
+        sx126x_errors_mask_t errors;
+        status = sx126x_get_device_errors(context, &errors);
+        if (status == SX126X_STATUS_OK) 
+        {
+            if (errors != 0) 
+            {
+                ESP_LOGE(TAG, "Radio reported errors: 0x%04X", errors);
+                if (errors & SX126X_ERRORS_PA_RAMP) ESP_LOGE(TAG, " - PA Ramping failed");
+                if (errors & SX126X_ERRORS_PLL_LOCK) ESP_LOGE(TAG, " - PLL lock failed");
+                if (errors & SX126X_ERRORS_XOSC_START) ESP_LOGE(TAG, " - XOSC start failed");
+                if (errors & SX126X_ERRORS_IMG_CALIBRATION) ESP_LOGE(TAG, " - Image calibration failed");
+                sx126x_clear_device_errors(context);
+            } 
+            else 
+            {
+                ESP_LOGI(TAG, "No errors reported by the radio.");
+            }
+        } 
+        else 
+        {
+            ESP_LOGE(TAG, "Failed to get device errors.");
+        }
+    }
+
+    /* #07 - Set the radio back to standby mode */
+    status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set standby failed: %d", status);
+    }
+
+    return status;
+}
+
+sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length, uint32_t rx_timeout_ms)
+{
+    sx126x_status_t status;
+
+    /* #01 - Set the radio in receiver mode */
+    /* This command sets the chip in RX mode, waiting for the reception of one or several packets. The receiver mode operates with a timeout
+     * to provide maximum flexibility to end users */
+    ESP_LOGI(TAG, "Setting radio to receive mode...");
+    /* Timeout options:
+     * - If set to 0 - No timeout. The device stays in RX Mode until a reception occurs and the devices return in STBY_RC mode upon completion.
+     * - If set to 0xFFFFFFFF - Rx Continuous mode. The device remains in RX mode until the host sends a command to change the operation mode. 
+     *   The device can receive several packets. Each time a packet is received, a packet done indication is given to the host and the device 
+     *   automatically searches for a new packet
+     * - If set to anything in between - Timeout active. The device remains in RX mode, it returns automatically to STBY_RC mode on timer
+     *   end-of-count or when a packet has been received. As soon as a packet is detected, the timer is automatically disabled to allow complete 
+     *   reception of the packet. The maximum timeout is then 262s 
+     */
+    status = sx126x_set_rx(context, rx_timeout_ms);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set RX failed: %d", status);
+        return status;
+    } 
+
+    /* #02 - Wait for the reception to complete which will be signaled by RX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
+    bool rx_success = false;
+    TickType_t dio1_sem_block_time = (rx_timeout_ms == RX_CONTINOUS_MODE) ? portMAX_DELAY : pdMS_TO_TICKS(rx_timeout_ms + 1000); //avoid overflow in case of continuous RX mode
+    if (xSemaphoreTake(dio1_sem, dio1_sem_block_time) == pdTRUE) 
+    {
+        sx126x_irq_mask_t irq_status;
+        status = sx126x_get_and_clear_irq_status(context, &irq_status);
+        if (status == SX126X_STATUS_OK) 
+        {
+            if (irq_status & SX126X_IRQ_RX_DONE) 
+            {
+                ESP_LOGI(TAG, "Reception completed successfully!");
+                rx_success = true;
+
+                /* #03 - Read the received packet from the RX buffer and copy it to the provided payload buffer */
+                sx126x_rx_buffer_status_t rx_status;
+                status = sx126x_get_rx_buffer_status(context, &rx_status);
+                if (status == SX126X_STATUS_OK && rx_status.pld_len_in_bytes > 0) 
+                {
+                    if(payload_length < rx_status.pld_len_in_bytes) 
+                    {
+                        ESP_LOGE(TAG, "Provided payload buffer is too small! Expected at least %u bytes, got %u bytes", rx_status.pld_len_in_bytes, payload_length);
+                        ESP_LOGE(TAG, "Truncating received payload to fit the buffer size.");
+                        rx_status.pld_len_in_bytes = payload_length; // Truncate to fit the buffer
+                    }
+
+                    status = sx126x_read_buffer(context, rx_status.buffer_start_pointer, payload, rx_status.pld_len_in_bytes);
+                    if (status == SX126X_STATUS_OK) 
+                    {
+                        ESP_LOGI(TAG, "Received: %.*s", rx_status.pld_len_in_bytes, payload);
+                    }
+                }
+            }
+            if (irq_status & SX126X_IRQ_TIMEOUT) 
+            {
+                ESP_LOGW(TAG, "Reception timeout IRQ!");
+            }
+        }
+    }
+    else 
+    {
+        ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for RX_DONE or TIMEOUT - check your interrupt configuration!");
+    }
+
+    /* #04 - Set the radio back to standby mode */
+    status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set standby failed: %d", status);
+        return status;
+    }
+
+    return status; 
 }
