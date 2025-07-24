@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "esp_log.h"
 #include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <freertos/semphr.h>
 #include "sx1262_interface.hpp"
 #include "heltec_v3_HAL.hpp"
@@ -63,6 +64,16 @@
 #define FREQUENCY_ETSI_EN_300_220_BAND_M 868300000 // (868.3MHz)    868,000 MHz to 868,600 MHz 25 mW e.r.p. ≤ 1 % duty cycle or polite spectrum access
 #define FREQUENCY_ETSI_EN_300_220_BAND_N 868950000 // (868.950MHz)  868,700 MHz to 869,200 MHz 25 mW e.r.p. ≤ 0,1 % duty cycle or polite spectrum access
 #define FREQUENCY_ETSI_EN_300_220_BAND_O 869525000 // (869.525MHz)  869,400 MHz to 869,650 MHz 500 mW e.r.p. ≤ 10 % duty cycle or polite spectrum access
+
+/* ETSI EN 300 220-2 also defines the duty cycle limits for the bands (if you don't use Polite Spectrum Access).
+ * The duty cycle is the percentage of time a device can transmit within a given period (usually 1 hour).
+ * For example, a 1% duty cycle means the device can transmit for 36 seconds in one hour, 10% duty cycle is 6 minutes per hour, etc.
+ */
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_K 0.1f
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_L 1.0f
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_M 1.0f
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N 0.1f
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O 10.0f
 
 static const void* context = NULL; // Context is not used in the HAL, so it can remain NULL.
 
