@@ -29,7 +29,7 @@ void sx1262_basic_test()
 
     while (1) 
     {
-        char message[] = "Hello from SX1262!";
+        char message[] = "Yo from SX1262#1";
         uint16_t payload_len = strlen(message);
         status = sx1262_send_packet((uint8_t*)message, payload_len);
         if (status != SX126X_STATUS_OK) 
@@ -49,7 +49,9 @@ void sx1262_basic_test()
         status = sx1262_receive_packet(rx_payload, rx_payload_len, 5000);
         if (status != SX126X_STATUS_OK) 
         {
-            ESP_LOGE(TAG, "Failed to receive packet: %d", status);
+            oled_clear_buffer();
+            oled_write_string_multiline(0, "Failed to receive a packet or nothing to receive :( ");
+            oled_refresh();
         } 
         else
         {
