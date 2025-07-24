@@ -592,6 +592,10 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
                         ESP_LOGI(TAG, "Received: %.*s", rx_status.pld_len_in_bytes, payload);
                     }
                 }
+                else
+                {
+                    ESP_LOGE(TAG, "Failed to get RX buffer status: %d", status);
+                }
             }
             if (irq_status & SX126X_IRQ_TIMEOUT) 
             {
@@ -611,6 +615,14 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
         ESP_LOGE(TAG, "Set standby failed: %d", status);
         return status;
     }
-
-    return status; 
+    else if (!rx_success) 
+    {
+        ESP_LOGE(TAG, "Reception failed or no packet received.");
+        return SX126X_STATUS_ERROR; // Return error if reception was not successful
+    }
+    else 
+    {
+        ESP_LOGI(TAG, "Reception completed successfully and radio is back in standby mode.");
+        return SX126X_STATUS_OK; // Return success if reception was successful
+    }
 }
