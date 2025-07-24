@@ -69,11 +69,11 @@
  * The duty cycle is the percentage of time a device can transmit within a given period (usually 1 hour).
  * For example, a 1% duty cycle means the device can transmit for 36 seconds in one hour, 10% duty cycle is 6 minutes per hour, etc.
  */
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_K 0.1f
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_L 1.0f
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_M 1.0f
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N 0.1f
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O 10.0f
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_K 0.001f // 0.1%
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_L 0.01f  // 1%
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_M 0.01f  // 1%
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N 0.001f // 0.1%
+#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O 0.1f   // 10%
 
 /* Variable for storing the timestamp when the next transmission is allowed. */
 static uint32_t next_tx_allowed_time_ms = 0;
