@@ -81,6 +81,8 @@ static uint32_t next_tx_allowed_time_ms = 0;
 /* LoRa modulation parameters, configured during initialization */
 sx126x_mod_params_lora_t lora_mod_params;
 
+static float current_duty_cycle_ratio = 0.0f;
+
 static const void* context = NULL; // Context is not used in the HAL, so it can remain NULL.
 
 static const char* TAG = "SX1262_INTERFACE";
@@ -191,7 +193,6 @@ sx126x_status_t sx1262_init_lora(void)
     /* #07 - Set the RF frequency */
     /* The actual LoRa transciever (SX1262) supports 150-960 MHz range but this particular 
      * Heltec V3 board is tuned to 863-928MHz as it says on the packaging */ 
-    ESP_LOGI(TAG, "Setting RF frequency to 868 MHz...");
     uint32_t freq_in_hz = FREQUENCY_ETSI_EN_300_220_BAND_O;
     status = sx126x_set_rf_freq(context, freq_in_hz);
     if (status != SX126X_STATUS_OK) 
@@ -199,6 +200,30 @@ sx126x_status_t sx1262_init_lora(void)
         ESP_LOGE(TAG, "Set RF frequency failed: %d", status);
         return status;
     }
+
+    /* #07a - Set the Duty Cycle limit based on the frequency band */
+    switch(freq_in_hz)
+    {
+        case FREQUENCY_ETSI_EN_300_220_BAND_K:
+            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_K;
+            break;
+        case FREQUENCY_ETSI_EN_300_220_BAND_L:
+            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_L;
+            break;
+        case FREQUENCY_ETSI_EN_300_220_BAND_M:
+            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_M;
+            break;
+        case FREQUENCY_ETSI_EN_300_220_BAND_N:
+            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N;
+            break;
+        case FREQUENCY_ETSI_EN_300_220_BAND_O:
+            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O;
+            break;
+        default:
+            ESP_LOGE(TAG, "No duty cycle defined for frequency %lu Hz!", freq_in_hz);
+            return SX126X_STATUS_ERROR;
+    }
+    ESP_LOGI(TAG, "Operating on frequency %lu Hz with a %.1f%% duty cycle.", freq_in_hz, (current_duty_cycle_ratio * 100.0f));
 
     /* #08 - Set the PA (Power Amplifier) configuration */
     /* The PA config parameters as per SX1262 datasheet (13.1.14 SetPaConfig):
@@ -483,7 +508,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
                  * If you want to implement a per-hour duty cycle, you would need to keep track
                  * of the total transmission time in the last hour and calculate the off-time accordingly (TODO - implement both options?) 
                  */
-                uint32_t off_time_ms = (uint32_t)(time_on_air_ms / DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O) - time_on_air_ms;
+                uint32_t off_time_ms = (uint32_t)(time_on_air_ms / current_duty_cycle_ratio) - time_on_air_ms;
                 next_tx_allowed_time_ms = end_tx_time_ms + off_time_ms;
 
                 ESP_LOGI(TAG, "Duty Cycle: Off-time is %lu ms. Next TX allowed at %lu ms.", off_time_ms, next_tx_allowed_time_ms);
