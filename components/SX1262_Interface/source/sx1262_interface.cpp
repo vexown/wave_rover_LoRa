@@ -531,9 +531,18 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set standby failed: %d", status);
+        return status;
     }
-
-    return status;
+    else if (tx_success) 
+    {
+        ESP_LOGI(TAG, "Transmission completed successfully and radio is back in standby mode.");
+        return SX126X_STATUS_OK;
+    }
+    else 
+    {
+        ESP_LOGE(TAG, "Transmission failed or no packet sent.");
+        return SX126X_STATUS_ERROR; 
+    }
 }
 
 sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length, uint32_t rx_timeout_ms)
