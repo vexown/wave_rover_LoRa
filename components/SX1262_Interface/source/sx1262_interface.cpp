@@ -75,9 +75,20 @@
 #define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N 0.1f
 #define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O 10.0f
 
+/* Variable for storing the timestamp when the next transmission is allowed. */
+static uint32_t next_tx_allowed_time_ms = 0;
+
+/* LoRa modulation parameters, configured during initialization */
+sx126x_mod_params_lora_t lora_mod_params;
+
 static const void* context = NULL; // Context is not used in the HAL, so it can remain NULL.
 
 static const char* TAG = "SX1262_INTERFACE";
+
+static inline uint32_t get_time_in_ms(void)
+{
+    return pdTICKS_TO_MS(xTaskGetTickCount());
+}
 
 sx126x_status_t sx1262_init_lora(void) 
 {
@@ -245,7 +256,7 @@ sx126x_status_t sx1262_init_lora(void)
      *      Time-on-Air" on page 41 ) in order to allow the receiver to have a better tracking of the LoRa signal. Depending on the payload size, the low
      *      data rate optimization is usually recommended when a LoRa symbol time is equal or above 16.38ms.*/
     ESP_LOGI(TAG, "Configuring LoRa modulation...");
-    sx126x_mod_params_lora_t lora_mod_params = 
+    lora_mod_params = 
     {
         .sf = SX126X_LORA_SF7,
         .bw = SX126X_LORA_BW_125,
@@ -295,7 +306,17 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
     sx126x_status_t status;
     sx126x_pkt_params_lora_t lora_packet_cfg;
 
-    /* #01 - Define the configuration for the LoRa packet and apply it */
+    /* #01 - Check Duty Cycle compliance */
+    uint32_t current_time_ms = get_time_in_ms();
+    if (current_time_ms < next_tx_allowed_time_ms)
+    {
+        uint32_t wait_time_ms = next_tx_allowed_time_ms - current_time_ms;
+
+        ESP_LOGE(TAG, "Duty cycle violation: Must wait %lu ms before next TX.", wait_time_ms);
+        return SX126X_STATUS_ERROR; 
+    }
+
+    /* #02 - Define the configuration for the LoRa packet and apply it */
     ESP_LOGI(TAG, "Configuring LoRa packet parameters...");
     /* Set general LoRa packet configuraton*/
     lora_packet_cfg.preamble_len_in_symb = PREAMBLE_LENGTH_8_SYMBOLS;
@@ -391,7 +412,11 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
         return status;
     }
 
-    /* #02 - Write the payload to the radio TX buffer */
+    /* #03 - Calculate the Time-on-Air (ToA) for the packet */
+    uint32_t time_on_air_ms = sx126x_get_lora_time_on_air_in_ms(&lora_packet_cfg, &lora_mod_params);
+    ESP_LOGI(TAG, "Packet ToA is %lu ms", time_on_air_ms);
+
+    /* #04 - Write the payload to the radio TX buffer */
     ESP_LOGI(TAG, "Payload length: %u", payload_length);
     ESP_LOG_BUFFER_HEX(TAG, payload, payload_length);
 
@@ -402,14 +427,14 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
         return status;
     }
 
-    /* #03 - Clear any pending IRQs (so we know any new IRQs are fresh) */
+    /* #05 - Clear any pending IRQs (so we know any new IRQs are fresh) */
     status = sx126x_clear_irq_status(context, SX126X_IRQ_ALL);  
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Clear IRQ failed: %d", status);
     }
 
-    /* #04 - Send the packet by setting the radio to transmit mode */
+    /* #06 - Send the packet by setting the radio to transmit mode */
     /* The transmit flow based on SX1262 datasheet (SetTx command description):
      * - Starting from STDBY_RC mode, the oscillator is switched ON followed by the PLL, then the PA is switched ON and
      *   the PA regulator starts ramping according to the ramping time defined by the command SetTxParams(...).
@@ -426,7 +451,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
      * - If set to 0 - timeout is disabled and the device stays in TX Mode until the packet is transmitted and returns in STBY_RC mode upon completion.
      * The value given for the timeout should be calculated for a given packet size, given modulation and packet parameters.
      */
-    const uint32_t tx_timeout_ms = 8000; // 8s seems long enough for most LoRa packets. For ToA visit Semtech's LoRa calculator: https://www.semtech.com/design-support/lora-calculator
+    const uint32_t tx_timeout_ms = time_on_air_ms + 500; // Add 500ms buffer to the ToA to account for any delays or processing time
     status = sx126x_set_tx(context, tx_timeout_ms);
     if (status != SX126X_STATUS_OK) 
     {
@@ -434,7 +459,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
         return status;
     }
 
-    /* #05 - Wait for the transmission to complete which will be signaled by TX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
+    /* #07 - Wait for the transmission to complete which will be signaled by TX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
     bool tx_success = false;
     if (xSemaphoreTake(dio1_sem, pdMS_TO_TICKS(tx_timeout_ms + 1000)) == pdTRUE) 
     {
@@ -442,10 +467,26 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
         status = sx126x_get_and_clear_irq_status(context, &irq_status);
         if (status == SX126X_STATUS_OK) 
         {
-            if (irq_status & SX126X_IRQ_TX_DONE) 
+            if (irq_status & SX126X_IRQ_TX_DONE)
             {
                 ESP_LOGI(TAG, "Transmission completed successfully!");
                 tx_success = true;
+
+                /* #07a - Update Duty Cycle state on successful transmission */
+                uint32_t end_tx_time_ms = get_time_in_ms();
+                /* Calculate required off-time based on ToA and duty cycle: 
+                 *            Off-Time = (ToA / DutyCycle) - ToA 
+                 * So for example if ToA is 1000ms and DutyCycle is 10% (0.1), then:
+                 * Off-Time = (1000ms / 0.1) - 1000ms = 10000ms - 1000ms = 9000ms
+                 * This means after a 1000ms transmission, we must wait 9000ms before the next transmission 
+                 * NOTE - THIS ASSUMES PER-PACKET DUTY CYCLE CALCULATION (NOT PER-HOUR)
+                 * If you want to implement a per-hour duty cycle, you would need to keep track
+                 * of the total transmission time in the last hour and calculate the off-time accordingly (TODO - implement both options?) 
+                 */
+                uint32_t off_time_ms = (uint32_t)(time_on_air_ms / DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O) - time_on_air_ms;
+                next_tx_allowed_time_ms = end_tx_time_ms + off_time_ms;
+
+                ESP_LOGI(TAG, "Duty Cycle: Off-time is %lu ms. Next TX allowed at %lu ms.", off_time_ms, next_tx_allowed_time_ms);
             }
             else if (irq_status & SX126X_IRQ_TIMEOUT) 
             {
@@ -458,7 +499,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
         ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for TX_DONE or TIMEOUT - check your interrupt configuration!");
     }
 
-    /* #06 - If transmission was not successful, check for errors reported by the radio */
+    /* #08 - If transmission was not successful, check for errors reported by the radio */
     if (!tx_success) 
     {
         sx126x_errors_mask_t errors;
@@ -485,7 +526,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
         }
     }
 
-    /* #07 - Set the radio back to standby mode */
+    /* #09 - Set the radio back to standby mode */
     status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
     if (status != SX126X_STATUS_OK) 
     {
