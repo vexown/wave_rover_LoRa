@@ -660,3 +660,33 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
         return SX126X_STATUS_OK; // Return success if reception was successful
     }
 }
+
+esp_err_t control_external_LED(bool state)
+{
+    static bool is_initialized = false;
+    if (!is_initialized) 
+    {
+        gpio_config_t io_conf = {};
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pin_bit_mask = (1ULL << HELTEC_V3_PIN_37);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+
+        gpio_config(&io_conf);
+
+        is_initialized = true;
+    }
+
+    /* Control the external LED I've attached to the Heltec V3 (makes sure it's connected physically) */
+    esp_err_t err = gpio_set_level(HELTEC_V3_PIN_37, state ? 0 : 1); // Active low, so 0 means ON, 1 means OFF
+    if (err != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to control external LED: %d", err);
+        return err;
+    }
+    else
+    {
+        return ESP_OK;
+    }
+}

@@ -33,4 +33,6 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length);
 
 sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length, uint32_t rx_timeout_ms);
 
+esp_err_t control_external_LED(bool state);
+
 #endif // SX1262_INTERFACE_H
