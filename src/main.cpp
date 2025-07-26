@@ -49,12 +49,14 @@ void sx1262_basic_test()
         status = sx1262_receive_packet(rx_payload, rx_payload_len, 5000);
         if (status != SX126X_STATUS_OK) 
         {
+            (void)control_external_LED(false);
             oled_clear_buffer();
             oled_write_string_multiline(0, "Failed to receive a packet or nothing to receive :( ");
             oled_refresh();
         } 
         else
         {
+            (void)control_external_LED(true);
             oled_clear_buffer();
             oled_write_string(0, "Received:");
             oled_write_string_multiline(1, (char*)rx_payload);
