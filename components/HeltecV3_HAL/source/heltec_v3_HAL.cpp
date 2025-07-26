@@ -1,4 +1,5 @@
 #include "sx126x_hal.h"
+#include "heltec_v3_HAL.hpp"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -8,17 +9,8 @@
 
 static const char* TAG = "HELTEC_SX126X_HAL";
 
-/* Heltec WiFi LoRa 32 V3.1 pin definitions based on the schematic (see header file) */
-#define SX126X_SPI_HOST     SPI2_HOST
-#define SX126X_MOSI_PIN     10
-#define SX126X_MISO_PIN     11
-#define SX126X_SCK_PIN      9
-#define SX126X_NSS_PIN      8
-#define SX126X_RST_PIN      12
-#define SX126X_DIO1_PIN     14
-#define SX126X_BUSY_PIN     13
-
 /* SPI configuration */
+#define SX126X_SPI_HOST     SPI2_HOST
 #define SX126X_SPI_CLOCK_HZ 1000000  // 1 MHz
 
 /* Misc defines (to avoid magic numbers) */
