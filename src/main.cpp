@@ -11,6 +11,16 @@
 #include "i2c_manager.h"
 #include "oled_display.h"
 
+#define RX_TIMEOUT_MS 5000
+
+/* Device modes */
+#define RECEIVER_MODE 0
+#define TRANSMITTER_MODE 1
+#define TRANSCEIVER_MODE 2
+
+/* Select the mode of operation (defined in platformio.ini) */
+static uint8_t device_mode = DEVICE_MODE;
+
 esp_err_t oled_err = ESP_FAIL; 
 
 static const char* TAG = "SX1262_TEST";
@@ -20,52 +30,9 @@ extern "C"
     void app_main(void);
 }
 
-void sx1262_basic_test()
-{
-    sx126x_status_t status;
-
-    ESP_LOGI(TAG, "Initializing SX1262...");
-    status = sx1262_init_lora();
-
-    while (1) 
-    {
-        char message[] = "Yo from SX1262#1";
-        uint16_t payload_len = strlen(message);
-        status = sx1262_send_packet((uint8_t*)message, payload_len);
-        if (status != SX126X_STATUS_OK) 
-        {
-            ESP_LOGE(TAG, "Failed to send packet: %d", status);
-        } 
-        else
-        {
-            oled_clear_buffer();
-            oled_write_string(0, "Sent:");
-            oled_write_string_multiline(1, message);
-            oled_refresh();
-        }
-
-        uint8_t rx_payload[256] = {}; // Buffer for received data
-        uint16_t rx_payload_len = sizeof(rx_payload);
-        status = sx1262_receive_packet(rx_payload, rx_payload_len, 5000);
-        if (status != SX126X_STATUS_OK) 
-        {
-            (void)control_external_LED(false);
-            oled_clear_buffer();
-            oled_write_string_multiline(0, "Failed to receive a packet or nothing to receive :( ");
-            oled_refresh();
-        } 
-        else
-        {
-            (void)control_external_LED(true);
-            oled_clear_buffer();
-            oled_write_string(0, "Received:");
-            oled_write_string_multiline(1, (char*)rx_payload);
-            oled_refresh();
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Wait 2 seconds before next iteration
-    }
-}
+static void transmitterMode(void);
+static void receiverMode(void);
+static void transceiverMode(void);
 
 void app_main(void)
 {
@@ -110,7 +77,153 @@ void app_main(void)
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // Wait a bit for system to stabilize
     
-    sx1262_basic_test(); // Run SX1262 test which now loops forever sending packets
+    if(device_mode == TRANSMITTER_MODE)
+    {
+        ESP_LOGI(TAG, "Running in Transmitter Mode...");
+        transmitterMode();
+    }
+    else if(device_mode == RECEIVER_MODE)
+    {
+        ESP_LOGI(TAG, "Running in Receiver Mode...");
+        receiverMode();
+    }
+    else if(device_mode == TRANSCEIVER_MODE)
+    {
+        ESP_LOGI(TAG, "Running in Transceiver Mode...");
+        transceiverMode();
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Invalid device mode selected!");
+        while(1) vTaskDelay(pdMS_TO_TICKS(1000)); // Forever block execution if invalid mode (TODO - handle it more gracefully)
+    }
 
     ESP_LOGI(TAG, "Application finished."); // This part will not be reached
+}
+
+static void transceiverMode()
+{
+    sx126x_status_t status;
+
+    ESP_LOGI(TAG, "Initializing SX1262...");
+    status = sx1262_init_lora();
+    if (status != SX126X_STATUS_OK)
+    {
+        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
+        esp_restart();
+    }
+
+    char message[] = "Yo from SX1262#1";
+    uint16_t payload_len = strlen(message);
+    uint8_t rx_payload[256] = {}; // Buffer for received data
+    uint16_t rx_payload_len = sizeof(rx_payload);
+
+    while (1) 
+    {
+        status = sx1262_send_packet((uint8_t*)message, payload_len);
+        if (status != SX126X_STATUS_OK) 
+        {
+            ESP_LOGE(TAG, "Failed to send packet: %d", status);
+        } 
+        else
+        {
+            oled_clear_buffer();
+            oled_write_string(0, "Sent:");
+            oled_write_string_multiline(1, message);
+            oled_refresh();
+        }
+
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, 5000);
+        if (status != SX126X_STATUS_OK) 
+        {
+            (void)control_external_LED(false);
+            oled_clear_buffer();
+            oled_write_string_multiline(0, "Failed to receive a packet or nothing to receive :( ");
+            oled_refresh();
+        } 
+        else
+        {
+            (void)control_external_LED(true);
+            oled_clear_buffer();
+            oled_write_string(0, "Received:");
+            oled_write_string_multiline(1, (char*)rx_payload);
+            oled_refresh();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2000)); // Wait 2 seconds before next iteration
+    }
+}
+
+static void transmitterMode()
+{
+    sx126x_status_t status;
+
+    ESP_LOGI(TAG, "Initializing SX1262...");
+    status = sx1262_init_lora();
+    if (status != SX126X_STATUS_OK)
+    {
+        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
+        esp_restart();
+    }
+
+    char message[] = "Yo from SX1262#1";
+    uint16_t payload_len = strlen(message);
+
+    while (1) 
+    {
+        status = sx1262_send_packet((uint8_t*)message, payload_len);
+        if (status != SX126X_STATUS_OK) 
+        {
+            (void)control_external_LED(false);
+            oled_clear_buffer();
+            oled_write_string_multiline(0, "Failed to send packet :( ");
+            oled_refresh();
+        } 
+        else
+        {
+            (void)control_external_LED(true);
+            oled_clear_buffer();
+            oled_write_string(0, "Sent:");
+            oled_write_string_multiline(1, message);
+            oled_refresh();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2000)); // Wait 2 seconds between transmissions
+    }
+}
+
+static void receiverMode()
+{
+    sx126x_status_t status;
+
+    ESP_LOGI(TAG, "Initializing SX1262...");
+    status = sx1262_init_lora();
+    if (status != SX126X_STATUS_OK)
+    {
+        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
+        esp_restart();
+    }
+
+    uint8_t rx_payload[256] = {};
+    uint16_t rx_payload_len = sizeof(rx_payload);
+
+    while (1) 
+    {
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, RX_TIMEOUT_MS);
+        if (status != SX126X_STATUS_OK) 
+        {
+            (void)control_external_LED(false);
+            oled_clear_buffer();
+            oled_write_string_multiline(0, "Failed to receive a packet or nothing to receive :( ");
+            oled_refresh();
+        } 
+        else
+        {
+            (void)control_external_LED(true);
+            oled_clear_buffer();
+            oled_write_string(0, "Received:");
+            oled_write_string_multiline(1, (char*)rx_payload);
+            oled_refresh();
+        }
+    }
 }
