@@ -573,6 +573,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
 sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length, uint32_t rx_timeout_ms)
 {
     sx126x_status_t status;
+    sx126x_pkt_params_lora_t lora_packet_cfg;
 
     /* #01 - Set the radio in receiver mode */
     /* This command sets the chip in RX mode, waiting for the reception of one or several packets. The receiver mode operates with a timeout
@@ -592,9 +593,24 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
     {
         ESP_LOGE(TAG, "Set RX failed: %d", status);
         return status;
-    } 
+    }
 
-    /* #02 - Wait for the reception to complete which will be signaled by RX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
+    /* #02 - Define the configuration for the LoRa packet and apply it */
+    ESP_LOGI(TAG, "Configuring the expected LoRa packet parameters...");
+    lora_packet_cfg.preamble_len_in_symb = PREAMBLE_LENGTH_8_SYMBOLS;
+    lora_packet_cfg.header_type = SX126X_LORA_PKT_EXPLICIT;
+    lora_packet_cfg.pld_len_in_bytes = payload_length;
+    lora_packet_cfg.crc_is_on = true;
+    lora_packet_cfg.invert_iq_is_on = false; // Configure for standard IQ (e.g., for transmitting an uplink)
+  
+    status = sx126x_set_lora_pkt_params(context, &lora_packet_cfg);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set LoRa packet params failed: %d", status);
+        return status;
+    }
+
+    /* #03 - Wait for the reception to complete which will be signaled by RX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
     bool rx_success = false;
     TickType_t dio1_sem_block_time = (rx_timeout_ms == RX_CONTINOUS_MODE) ? portMAX_DELAY : pdMS_TO_TICKS(rx_timeout_ms + 1000); //avoid overflow in case of continuous RX mode
     if (xSemaphoreTake(dio1_sem, dio1_sem_block_time) == pdTRUE) 
@@ -608,7 +624,7 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
                 ESP_LOGI(TAG, "Reception completed successfully!");
                 rx_success = true;
 
-                /* #03 - Read the received packet from the RX buffer and copy it to the provided payload buffer */
+                /* #04 - Read the received packet from the RX buffer and copy it to the provided payload buffer */
                 sx126x_rx_buffer_status_t rx_status;
                 status = sx126x_get_rx_buffer_status(context, &rx_status);
                 if (status == SX126X_STATUS_OK && rx_status.pld_len_in_bytes > 0) 
@@ -642,7 +658,7 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
         ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for RX_DONE or TIMEOUT - check your interrupt configuration!");
     }
 
-    /* #04 - Set the radio back to standby mode */
+    /* #05 - Set the radio back to standby mode */
     status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
     if (status != SX126X_STATUS_OK) 
     {
