@@ -6,6 +6,8 @@ extern "C" {
 
 void web_updater_wifi_start(const char *ssid, const char *password);
 
+void start_mdns_service(void);
+
 #ifdef __cplusplus
 }
 #endif

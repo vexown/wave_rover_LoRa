@@ -32,7 +32,7 @@ static esp_err_t update_post_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA partition not found");
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x",
+    ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%" PRIx32,
              update_partition->subtype, update_partition->address);
 
     esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
@@ -121,6 +121,8 @@ void web_updater_start(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+    config.stack_size = 8192;
     
     // It's better to have a dedicated endpoint for the update
     config.uri_match_fn = httpd_uri_match_wildcard;

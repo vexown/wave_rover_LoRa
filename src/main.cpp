@@ -40,10 +40,9 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Starting Wave Rover LoRa application...");
 
-    //const char *wifi_ssid = "StatekMatka_V2";
-    //const char *wifi_pass = "TODO";
-    //web_updater_wifi_start(wifi_ssid, wifi_pass);
-    //web_updater_start();
+    const char *wifi_ssid = "StatekMatka_V2";
+    const char *wifi_pass = "TODO"; //TODO, add real password but load it from NVS 
+    web_updater_wifi_start(wifi_ssid, wifi_pass);
 
     ESP_LOGI(TAG, "Initializing I2C Manager...");
     esp_err_t i2c_err = i2c_manager_init(I2C_MANAGER_DEFAULT_PORT, I2C_MANAGER_DEFAULT_SDA, I2C_MANAGER_DEFAULT_SCL);
