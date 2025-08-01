@@ -10,6 +10,7 @@
 #include "driver/gpio.h"
 #include "i2c_manager.h"
 #include "oled_display.h"
+#include "nvs_flash.h"
 #include "web_updater_wifi.h"
 #include "web_updater.h"
 
@@ -19,6 +20,16 @@
 #define RECEIVER_MODE 0
 #define TRANSMITTER_MODE 1
 #define TRANSCEIVER_MODE 2
+
+typedef enum 
+{
+    INIT_SUCCESS = 0,
+    NVS_INIT_FAILED,
+    WIFI_INIT_FAILED,
+    I2C_INIT_FAILED,
+    OLED_INIT_FAILED,
+    SX1262_INIT_FAILED
+} init_status_t;
 
 /* Select the mode of operation (defined in platformio.ini) */
 static uint8_t device_mode = DEVICE_MODE;
@@ -32,6 +43,7 @@ extern "C"
     void app_main(void);
 }
 
+static init_status_t init_components(void);
 static void transmitterMode(void);
 static void receiverMode(void);
 static void transceiverMode(void);
@@ -40,45 +52,16 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Starting Wave Rover LoRa application...");
 
-    const char *wifi_ssid = "StatekMatka_V2";
-    const char *wifi_pass = "TODO"; //TODO, add real password but load it from NVS 
-    web_updater_wifi_start(wifi_ssid, wifi_pass);
-
-    ESP_LOGI(TAG, "Initializing I2C Manager...");
-    esp_err_t i2c_err = i2c_manager_init(I2C_MANAGER_DEFAULT_PORT, I2C_MANAGER_DEFAULT_SDA, I2C_MANAGER_DEFAULT_SCL);
-    if (i2c_err != ESP_OK)
+    init_status_t init_status = init_components();
+    if (init_status != INIT_SUCCESS)
     {
-        ESP_LOGI(TAG, "I2C Manager initialization failed: %s", esp_err_to_name(i2c_err)); // Log the error but continue execution (TODO: Decide how to handle failure)
+        ESP_LOGE(TAG, "Initialization failed with status: %d", init_status);
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Wait a bit before restarting
+        esp_restart(); // Restart the system on initialization failure
     }
     else
     {
-        ESP_LOGI(TAG, "I2C Manager Initialized.");
-    }
-
-    ESP_LOGI(TAG, "Initializing OLED Display...");
-    oled_err = oled_init(); // oled_err is global, so it's updated directly
-    if (oled_err != ESP_OK)
-    {
-        ESP_LOGI(TAG, "OLED initialization failed: %s", esp_err_to_name(oled_err)); // Log the error but continue execution (TODO: Decide how to handle failure)
-    }
-    else
-    {
-        ESP_LOGI(TAG, "OLED Display Initialized.");
-    }
-
-    if (oled_err == ESP_OK)
-    {
-        /* Display welcome message on the OLED display */
-        oled_clear_buffer();
-        oled_write_string(0, "Wave Rover LoRa");
-        oled_write_string(1, "                ");
-        oled_write_string(2, "    (o-o)    ");
-        oled_write_string(3, "   /  |  \\   ");
-        oled_write_string(4, "  /_______\\  ");
-        oled_write_string(5, "  o       o  ");
-        oled_write_string(6, "  ~~~~~~~~~  ");
-        oled_write_string(7, " ~         ~ ");
-        oled_refresh();
+        ESP_LOGI(TAG, "All components initialized successfully.");
     }
 
     vTaskDelay(pdMS_TO_TICKS(1000)); // Wait a bit for system to stabilize
@@ -103,21 +86,11 @@ void app_main(void)
         ESP_LOGE(TAG, "Invalid device mode selected!");
         while(1) vTaskDelay(pdMS_TO_TICKS(1000)); // Forever block execution if invalid mode (TODO - handle it more gracefully)
     }
-
-    ESP_LOGI(TAG, "Application finished."); // This part will not be reached
 }
 
 static void transceiverMode()
 {
     sx126x_status_t status;
-
-    ESP_LOGI(TAG, "Initializing SX1262...");
-    status = sx1262_init_lora();
-    if (status != SX126X_STATUS_OK)
-    {
-        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
-        esp_restart();
-    }
 
     char message[] = "Yo from SX1262#1";
     uint16_t payload_len = strlen(message);
@@ -164,14 +137,6 @@ static void transmitterMode()
 {
     sx126x_status_t status;
 
-    ESP_LOGI(TAG, "Initializing SX1262...");
-    status = sx1262_init_lora();
-    if (status != SX126X_STATUS_OK)
-    {
-        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
-        esp_restart();
-    }
-
     char message[] = "Yo from SX1262#1";
     uint16_t payload_len = strlen(message);
 
@@ -202,14 +167,6 @@ static void receiverMode()
 {
     sx126x_status_t status;
 
-    ESP_LOGI(TAG, "Initializing SX1262...");
-    status = sx1262_init_lora();
-    if (status != SX126X_STATUS_OK)
-    {
-        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
-        esp_restart();
-    }
-
     uint8_t rx_payload[256] = {};
     uint16_t rx_payload_len = sizeof(rx_payload);
 
@@ -232,4 +189,88 @@ static void receiverMode()
             oled_refresh();
         }
     }
+}
+
+static init_status_t init_components(void)
+{
+    /* ----------------- #01 - NVS Initialization ----------------- */
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
+    {
+        /* Erase NVS partition and try to initialize again */
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+        if(ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "NVS Flash initialization failed: %s", esp_err_to_name(ret));
+            return NVS_INIT_FAILED;
+        }
+    }
+
+    /* ----------------- #02 - WiFi Initialization ----------------- */
+    const char *wifi_ssid = "StatekMatka_V2";
+    const char *wifi_pass = "TODO"; //TODO, add real password but load it from NVS 
+    bool wifi_status = web_updater_wifi_start(wifi_ssid, wifi_pass);
+    if (!wifi_status) 
+    {
+        ESP_LOGE(TAG, "WiFi initialization failed");
+        return WIFI_INIT_FAILED;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "WiFi initialized successfully.");
+    }
+
+    /* ----------------- #03 - I2C Manager Initialization ----------------- */
+    ESP_LOGI(TAG, "Initializing I2C Manager...");
+    esp_err_t i2c_err = i2c_manager_init(I2C_MANAGER_DEFAULT_PORT, I2C_MANAGER_DEFAULT_SDA, I2C_MANAGER_DEFAULT_SCL);
+    if (i2c_err != ESP_OK)
+    {
+        ESP_LOGI(TAG, "I2C Manager initialization failed: %s", esp_err_to_name(i2c_err)); 
+        return I2C_INIT_FAILED;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "I2C Manager Initialized.");
+    }
+
+    /* ----------------- #04 - OLED Display Initialization ----------------- */
+    ESP_LOGI(TAG, "Initializing OLED Display...");
+    oled_err = oled_init(); // oled_err is global, so it's updated directly
+    if (oled_err != ESP_OK)
+    {
+        ESP_LOGI(TAG, "OLED initialization failed: %s", esp_err_to_name(oled_err)); 
+        return OLED_INIT_FAILED;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "OLED Display Initialized.");
+
+        /* Display welcome message on the OLED display */
+        oled_clear_buffer();
+        oled_write_string(0, "Wave Rover LoRa");
+        oled_write_string(1, "                ");
+        oled_write_string(2, "    (o-o)    ");
+        oled_write_string(3, "   /  |  \\   ");
+        oled_write_string(4, "  /_______\\  ");
+        oled_write_string(5, "  o       o  ");
+        oled_write_string(6, "  ~~~~~~~~~  ");
+        oled_write_string(7, " ~         ~ ");
+        oled_refresh();
+    }
+
+    /* ----------------- #05 - SX1262 Initialization ----------------- */
+    ESP_LOGI(TAG, "Initializing SX1262...");
+    sx126x_status_t status = sx1262_init_lora();
+    if (status != SX126X_STATUS_OK)
+    {
+        ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
+        return SX1262_INIT_FAILED;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "SX1262 Initialized successfully.");
+    }
+
+    return INIT_SUCCESS; // All components initialized successfully
 }
