@@ -29,6 +29,10 @@
 #define TIMEOUT_DISABLED        0x00
 #define MAX_LORA_PAYLOAD_LENGTH 255 // Maximum payload length for LoRa packets (uint8_t)
 #define RX_CONTINOUS_MODE       0xFFFFFFFF
+/* Extra margin (in ms) added to the RX timeout when waiting for the DIO1 IRQ semaphore.
+ * This accounts for system scheduling delays, SPI latency, and ensures we don't miss the IRQ event.
+ * Increase if you observe missed IRQs or false timeouts on slower systems. */
+#define SX1262_RX_IRQ_MARGIN_MS 2000
 
 /* ETSI EN 300 220-2 V3.3.1 (2025-01) defines the frequency bands and power limits for "short-range" (more like low-power) (SRD) 
  * sub 1GHz (25MHz - 1000MHz) up to 500mW e.r.p RF devices in Europe (see Annex B for details):
@@ -612,7 +616,7 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
 
     /* #03 - Wait for the reception to complete which will be signaled by RX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
     bool rx_success = false;
-    TickType_t dio1_sem_block_time = (rx_timeout_ms == RX_CONTINOUS_MODE) ? portMAX_DELAY : pdMS_TO_TICKS(rx_timeout_ms + 1000); //avoid overflow in case of continuous RX mode
+    TickType_t dio1_sem_block_time = (rx_timeout_ms == RX_CONTINOUS_MODE) ? portMAX_DELAY : pdMS_TO_TICKS(rx_timeout_ms + SX1262_RX_IRQ_MARGIN_MS); //avoid overflow in case of continuous RX mode
     if (xSemaphoreTake(dio1_sem, dio1_sem_block_time) == pdTRUE) 
     {
         sx126x_irq_mask_t irq_status;
@@ -655,7 +659,7 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length,
     }
     else 
     {
-        ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for RX_DONE or TIMEOUT - check your interrupt configuration!");
+        ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for RX_DONE or TIMEOUT - check your interrupt configuration or try increasing the SX1262_RX_IRQ_MARGIN_MS value!");
     }
 
     /* #05 - Set the radio back to standby mode */
