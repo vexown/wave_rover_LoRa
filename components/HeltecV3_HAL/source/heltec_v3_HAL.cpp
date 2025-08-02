@@ -23,6 +23,7 @@ static const char* TAG = "HELTEC_SX126X_HAL";
 #define SPI_NO_FLAGS 0
 #define SPI_DEFAULT_QUEUE_SIZE 1
 #define SPI_WAKEUP_LENGTH_BITS 8
+#define SX126X_SPI_MAX_TRANSFER_SIZE 257  // 2 bytes command + 255 bytes payload
 
 static spi_device_handle_t spi_handle = NULL;
 static bool hal_initialized = false;
@@ -73,7 +74,7 @@ static esp_err_t sx126x_hal_init(void)
         .data6_io_num = NOT_USED_PIN,
         .data7_io_num = NOT_USED_PIN,
         .data_io_default_level = LOGIC_LEVEL_LOW, // Default logic level for unused IO pins (not relevant in standard SPI mode)
-        .max_transfer_sz = 256, // max transfer size in bytes
+        .max_transfer_sz = SX126X_SPI_MAX_TRANSFER_SIZE, // max transfer size in bytes (255 payload + 2 bytes command length)
 #if (ESP_IDF_VERSION_MAJOR >= 4)
         .flags = SPI_NO_FLAGS,
         .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO,
@@ -198,13 +199,13 @@ sx126x_hal_status_t sx126x_hal_write(const void* context, const uint8_t* command
 
     /* #02 - Verify command and data lengths place them in the a tx buffer */
     uint16_t total_length = command_length + data_length;
-    if (total_length > 256) 
+    if (total_length > SX126X_SPI_MAX_TRANSFER_SIZE) 
     {
         ESP_LOGE(TAG, "Transfer too large: %d bytes", total_length);
         return SX126X_HAL_STATUS_ERROR;
     }
 
-    uint8_t tx_buffer[256];
+    uint8_t tx_buffer[SX126X_SPI_MAX_TRANSFER_SIZE];
     memcpy(tx_buffer, command, command_length);
     if (data_length > 0 && data != NULL) 
     {
@@ -255,14 +256,14 @@ sx126x_hal_status_t sx126x_hal_read(const void* context, const uint8_t* command,
 
     /* #02 - Verify command and data lengths and prepare the tx and rx buffers */
     uint16_t total_length = command_length + data_length;
-    if (total_length > 256) 
+    if (total_length > SX126X_SPI_MAX_TRANSFER_SIZE) 
     {
         ESP_LOGE(TAG, "Transfer too large: %d bytes", total_length);
         return SX126X_HAL_STATUS_ERROR;
     }
 
-    uint8_t tx_buffer[256];
-    uint8_t rx_buffer[256];
+    uint8_t tx_buffer[SX126X_SPI_MAX_TRANSFER_SIZE];
+    uint8_t rx_buffer[SX126X_SPI_MAX_TRANSFER_SIZE];
 
     memcpy(tx_buffer, command, command_length);
     /* Fill remaining TX buffer with NOP for read operation */
