@@ -15,22 +15,25 @@
 #include "web_updater.h"
 #include "persistent_params.h"
 
+/* WiFi Credentials */
+/* To update the NVS with your WiFi credentials, provide them in the appropriate macros in the platformio.ini file
+ * and use the param_update build environment.
+ * Then build and flash the firmware. Later, you can change the macro values
+ * back to placeholders and go back to the normal env so you don't accidentally commit your credentials. */
 /* You can host a hotspot with these credentials if you don't want to provide your own */
 #define WIFI_SSID_DEFAULT "kekwifi"
 #define WIFI_PASSWORD_DEFAULT "kekpassword"
-/* To update the NVS with your WiFi credentials, provide them in these macros
- * and use the param_update build environment in platformio.ini 
- * Then build and flash the firmware. Later, you can change the macro values
- * back to placeholders and go back to the normal env so you don't accidentally commit your credentials. */
-#define WIFI_SSID "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-
-#define RX_TIMEOUT_MS 5000
 
 /* Device modes */
+/* To change the device mode, select appropriate mode in platformio.ini and use the param_update build environment.
+ * The device mode is stored in NVS, so you can change it later without reflashing the firmware. */
 #define RECEIVER_MODE 0
 #define TRANSMITTER_MODE 1
 #define TRANSCEIVER_MODE 2
+#define DEVICE_MODE_DEFAULT RECEIVER_MODE
+
+/* Misc defines */
+#define RX_TIMEOUT_MS 5000
 
 typedef enum 
 {
@@ -43,8 +46,8 @@ typedef enum
     SX1262_INIT_FAILED
 } init_status_t;
 
-/* Select the mode of operation (defined in platformio.ini) */
-static uint8_t device_mode = DEVICE_MODE;
+/* Select the mode of operation (stored in NVS, use param_update env in platformio.ini to change it) */
+static int32_t device_mode;
 
 esp_err_t oled_err = ESP_FAIL; 
 
@@ -220,8 +223,33 @@ static init_status_t init_components(void)
         }
     }
 
-    /* ----------------- #02 - WiFi Initialization ----------------- */
-    esp_err_t param_status = persistent_params_init_string("wifi_ssid", WIFI_SSID_DEFAULT);
+    /* ----------------- #02 - Params Initialization ----------------- */
+    esp_err_t param_status;
+
+    /* Param #01 - Device Mode */
+    param_status = persistent_params_init_integer("device_mode", DEVICE_MODE_DEFAULT);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to add Device Mode parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+#if defined(UPDATE_DEVICE_MODE_PARAM) || defined(UPDATE_ALL_PARAMS)
+    param_status = persistent_params_set_integer("device_mode", DEVICE_MODE);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to set Device Mode parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+#endif
+    param_status = persistent_params_get_integer("device_mode", &device_mode);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to get Device Mode parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+
+    /* Param #2 - WiFi Credentials */
+    param_status = persistent_params_init_string("wifi_ssid", WIFI_SSID_DEFAULT);
     if (param_status != ESP_OK) 
     {
         ESP_LOGE(TAG, "Failed to add WiFi SSID parameter: %s", esp_err_to_name(param_status));
@@ -233,7 +261,7 @@ static init_status_t init_components(void)
         ESP_LOGE(TAG, "Failed to add WiFi Password parameter: %s", esp_err_to_name(param_status));
         return PARAM_FAILED;
     }
-#ifdef UPDATE_PARAMS_IN_NVS
+#if defined(UPDATE_WIFI_CREDENTIALS_PARAM) || defined(UPDATE_ALL_PARAMS)
     param_status = persistent_params_set_string("wifi_ssid", WIFI_SSID);
     if (param_status != ESP_OK) 
     {
@@ -262,6 +290,7 @@ static init_status_t init_components(void)
         return PARAM_FAILED;
     }
 
+    /* ----------------- #03 - WiFi Initialization ----------------- */
     bool wifi_status = web_updater_wifi_start(wifi_ssid, wifi_password);
     if (!wifi_status) 
     {
@@ -273,7 +302,7 @@ static init_status_t init_components(void)
         ESP_LOGI(TAG, "WiFi initialized successfully.");
     }
 
-    /* ----------------- #03 - I2C Manager Initialization ----------------- */
+    /* ----------------- #04 - I2C Manager Initialization ----------------- */
     ESP_LOGI(TAG, "Initializing I2C Manager...");
     esp_err_t i2c_err = i2c_manager_init(I2C_MANAGER_DEFAULT_PORT, I2C_MANAGER_DEFAULT_SDA, I2C_MANAGER_DEFAULT_SCL);
     if (i2c_err != ESP_OK)
@@ -286,7 +315,7 @@ static init_status_t init_components(void)
         ESP_LOGI(TAG, "I2C Manager Initialized.");
     }
 
-    /* ----------------- #04 - OLED Display Initialization ----------------- */
+    /* ----------------- #05 - OLED Display Initialization ----------------- */
     ESP_LOGI(TAG, "Initializing OLED Display...");
     oled_err = oled_init(); // oled_err is global, so it's updated directly
     if (oled_err != ESP_OK)
@@ -311,7 +340,7 @@ static init_status_t init_components(void)
         oled_refresh();
     }
 
-    /* ----------------- #05 - SX1262 Initialization ----------------- */
+    /* ----------------- #06 - SX1262 Initialization ----------------- */
     ESP_LOGI(TAG, "Initializing SX1262...");
     sx126x_status_t status = sx1262_init_lora();
     if (status != SX126X_STATUS_OK)

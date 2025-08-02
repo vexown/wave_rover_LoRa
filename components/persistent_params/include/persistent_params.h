@@ -63,7 +63,7 @@ esp_err_t persistent_params_init_integer(const char* name, int32_t default_value
  * @param value Pointer to store the value.
  * @return ESP_OK on success, otherwise an error code.
  */
-esp_err_t persistent_params_get_int(const char* name, int32_t* value);
+esp_err_t persistent_params_get_integer(const char* name, int32_t* value);
 
 /*
  * @brief Sets the value of an integer parameter
@@ -72,7 +72,7 @@ esp_err_t persistent_params_get_int(const char* name, int32_t* value);
  * @param value The new value of the parameter.
  * @return ESP_OK on success, otherwise an error code.
  */
-esp_err_t persistent_params_set_int(const char* name, int32_t value);
+esp_err_t persistent_params_set_integer(const char* name, int32_t value);
 
 #ifdef __cplusplus
 }

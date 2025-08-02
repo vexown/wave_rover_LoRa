@@ -145,7 +145,7 @@ esp_err_t persistent_params_init_integer(const char* name, int32_t default_value
     return persistent_params_init_string(name, str_value);
 }
 
-esp_err_t persistent_params_get_int(const char* name, int32_t* value)
+esp_err_t persistent_params_get_integer(const char* name, int32_t* value)
 {
     char str_value[12];
     esp_err_t err = persistent_params_get_string(name, str_value, sizeof(str_value));
@@ -156,7 +156,7 @@ esp_err_t persistent_params_get_int(const char* name, int32_t* value)
     return err;
 }
 
-esp_err_t persistent_params_set_int(const char* name, int32_t value)
+esp_err_t persistent_params_set_integer(const char* name, int32_t value)
 {
     char str_value[12];
     snprintf(str_value, sizeof(str_value), "%ld", (long)value);
