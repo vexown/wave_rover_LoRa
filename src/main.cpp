@@ -3,7 +3,6 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
-#include "sx126x.h"
 #include <string.h>
 #include "sx1262_interface.hpp"
 #include "driver/i2c_master.h"
