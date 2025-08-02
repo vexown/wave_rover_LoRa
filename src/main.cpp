@@ -152,7 +152,12 @@ static void transmitterMode()
 {
     sx126x_status_t status;
 
-    char message[] = "Yo from SX1262#1";
+    char message[MAX_LORA_PAYLOAD_LENGTH + 1] = {};
+    for (int i = 0; i < MAX_LORA_PAYLOAD_LENGTH; ++i) 
+    {
+        message[i] = 'A' + (i % 26);
+    }
+    message[MAX_LORA_PAYLOAD_LENGTH] = '\0';
     uint8_t payload_len = strlen(message);
 
     while (1) 
@@ -174,7 +179,7 @@ static void transmitterMode()
             oled_refresh();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Wait 2 seconds between transmissions
+        vTaskDelay(pdMS_TO_TICKS(4000)); // Wait 4 seconds between transmissions
     }
 }
 
