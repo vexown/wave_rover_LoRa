@@ -27,7 +27,6 @@
 #define LDRO_ENABLED            0x01
 #define LDRO_DISABLED           0x00
 #define TIMEOUT_DISABLED        0x00
-#define MAX_LORA_PAYLOAD_LENGTH 255 // Maximum payload length for LoRa packets (uint8_t)
 #define RX_CONTINOUS_MODE       0xFFFFFFFF
 /* Extra margin (in ms) added to the RX timeout when waiting for the DIO1 IRQ semaphore.
  * This accounts for system scheduling delays, SPI latency, and ensures we don't miss the IRQ event.
@@ -330,7 +329,7 @@ sx126x_status_t sx1262_init_lora(void)
 }
 
 
-sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
+sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
 {
     sx126x_status_t status;
     sx126x_pkt_params_lora_t lora_packet_cfg;
@@ -574,7 +573,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint16_t payload_length)
     }
 }
 
-sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint16_t payload_length, uint32_t rx_timeout_ms)
+sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, uint32_t rx_timeout_ms)
 {
     sx126x_status_t status;
     sx126x_pkt_params_lora_t lora_packet_cfg;

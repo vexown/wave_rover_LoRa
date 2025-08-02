@@ -108,9 +108,9 @@ static void transceiverMode()
     sx126x_status_t status;
 
     char message[] = "Yo from SX1262#1";
-    uint16_t payload_len = strlen(message);
-    uint8_t rx_payload[256] = {}; // Buffer for received data
-    uint16_t rx_payload_len = sizeof(rx_payload);
+    uint8_t payload_len = strlen(message);
+    uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {}; // Buffer for received data
+    uint8_t rx_payload_len = sizeof(rx_payload);
 
     while (1) 
     {
@@ -153,7 +153,7 @@ static void transmitterMode()
     sx126x_status_t status;
 
     char message[] = "Yo from SX1262#1";
-    uint16_t payload_len = strlen(message);
+    uint8_t payload_len = strlen(message);
 
     while (1) 
     {
@@ -182,8 +182,8 @@ static void receiverMode()
 {
     sx126x_status_t status;
 
-    uint8_t rx_payload[256] = {};
-    uint16_t rx_payload_len = sizeof(rx_payload);
+    uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {};
+    uint8_t rx_payload_len = sizeof(rx_payload);
 
     while (1) 
     {
