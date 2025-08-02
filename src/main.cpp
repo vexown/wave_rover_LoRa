@@ -110,6 +110,8 @@ static void transceiverMode()
     uint8_t payload_len = strlen(message);
     uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {}; // Buffer for received data
     uint8_t rx_payload_len = sizeof(rx_payload);
+    lora_packet_metrics_t pkt_metrics = {};
+    char metrics_str[64] = {};
 
     while (1) 
     {
@@ -126,7 +128,7 @@ static void transceiverMode()
             oled_refresh();
         }
 
-        status = sx1262_receive_packet(rx_payload, rx_payload_len, RX_TIMEOUT_MS);
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, &pkt_metrics, RX_TIMEOUT_MS);
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -138,8 +140,10 @@ static void transceiverMode()
         {
             (void)control_external_LED(true);
             oled_clear_buffer();
-            oled_write_string(0, "Received:");
-            oled_write_string_multiline(1, (char*)rx_payload);
+            oled_write_string(0, "Packet Received!");
+            snprintf(metrics_str, sizeof(metrics_str), "SNR: %d dB  RSSI: %d dBm RSSI[sig]: %d dBm", 
+                                                        pkt_metrics.snr_db, pkt_metrics.rssi_dbm, pkt_metrics.signal_rssi_dbm);
+            oled_write_string_multiline(1, metrics_str);
             oled_refresh();
         }
 
@@ -188,10 +192,12 @@ static void receiverMode()
 
     uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {};
     uint8_t rx_payload_len = sizeof(rx_payload);
+    lora_packet_metrics_t pkt_metrics = {};
+    char metrics_str[64] = {};
 
     while (1) 
     {
-        status = sx1262_receive_packet(rx_payload, rx_payload_len, RX_TIMEOUT_MS);
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, &pkt_metrics, RX_TIMEOUT_MS);
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -203,8 +209,13 @@ static void receiverMode()
         {
             (void)control_external_LED(true);
             oled_clear_buffer();
-            oled_write_string(0, "Received:");
-            oled_write_string_multiline(1, (char*)rx_payload);
+            oled_write_string(0, "Packet Received!");
+            snprintf(metrics_str, sizeof(metrics_str), "SNR: %d dB", pkt_metrics.snr_db);
+            oled_write_string(1, metrics_str);
+            snprintf(metrics_str, sizeof(metrics_str), "RSSI: %d dBm", pkt_metrics.rssi_dbm);
+            oled_write_string(2, metrics_str);
+            snprintf(metrics_str, sizeof(metrics_str), "RSSI[sig]: %d dBm", pkt_metrics.signal_rssi_dbm);
+            oled_write_string(3, metrics_str);
             oled_refresh();
         }
     }

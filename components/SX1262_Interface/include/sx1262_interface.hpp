@@ -20,6 +20,36 @@
 
 #define MAX_LORA_PAYLOAD_LENGTH 255 // Maximum payload length for LoRa packets (uint8_t)
 
+#include <stdint.h>
+
+typedef struct 
+{
+    /**
+     * Signal RSSI after despreading (in dBm).
+     * This represents the estimated power of the LoRa signal itself,
+     * measured after the chirp spread-spectrum demodulation has removed most of the noise.
+     * It's generally more accurate for evaluating actual link quality, since it excludes background noise.
+     * Use this to assess how strong the useful LoRa signal was.
+     */
+    int8_t signal_rssi_dbm;
+
+    /**
+     * Average RSSI over the entire received packet (in dBm).
+     * This includes both signal and background noise.
+     * Use this if you want to know the total RF energy level during reception,
+     * or if you're comparing to systems where RSSI includes noise.
+     */
+    int8_t rssi_dbm;
+
+    /**
+     * Signal-to-noise ratio of the received LoRa packet (in dB).
+     * Calculated during demodulation; useful for understanding how well the signal
+     * stands out from noise. Positive values indicate good quality.
+     */
+    int8_t snr_db;
+} lora_packet_metrics_t;
+
+
 /**
  * @brief Initialize the SX1262 LoRa transceiver with default settings.
  *
@@ -33,7 +63,7 @@ sx126x_status_t sx1262_init_lora(void);
 
 sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length);
 
-sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, uint32_t rx_timeout_ms);
+sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, lora_packet_metrics_t* pkt_metrics, uint32_t rx_timeout_ms);
 
 esp_err_t control_external_LED(bool state);
 

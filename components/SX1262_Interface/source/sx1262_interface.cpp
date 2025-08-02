@@ -573,7 +573,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
     }
 }
 
-sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, uint32_t rx_timeout_ms)
+sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, lora_packet_metrics_t* pkt_metrics, uint32_t rx_timeout_ms)
 {
     sx126x_status_t status;
     sx126x_pkt_params_lora_t lora_packet_cfg;
@@ -649,6 +649,27 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
                 {
                     ESP_LOGE(TAG, "Failed to get RX buffer status: %d", status);
                 }
+                /* #05 - Get the packet status (SNR and RSSI) */
+                /* See GetPacketStatus command in SX1262 datasheet for details. Here is the breakdown of pkt_status fields:
+                 *     - rssi_pkt_in_dbm: Average over last packet received of RSSI. Actual signal power is –RssiPkt/2 (dBm) 
+                 *     - snr_pkt_in_db: Estimation of SNR on last packet received in two’s compliment format multiplied by 4. Actual SNR in dB = SnrPkt/4
+                 *     - signal_rssi_pkt_in_dbm: Estimation of RSSI of the LoRa signal (after despreading) on last packet received. Actual Rssi in dB = -SignalRssiPkt/2
+                 * It's a bit misleading but the above calculations are already done in the sx126x_get_lora_pkt_status function (see it in sx126x.c for yourself).
+                 * So you can just use the values from sx126x_get_lora_pkt_status directly without any further calculations.
+                 */
+                sx126x_pkt_status_lora_t pkt_status;
+                status = sx126x_get_lora_pkt_status(context, &pkt_status);
+                pkt_metrics->snr_db = pkt_status.snr_pkt_in_db;
+                pkt_metrics->rssi_dbm = pkt_status.rssi_pkt_in_dbm;
+                pkt_metrics->signal_rssi_dbm = pkt_status.signal_rssi_pkt_in_dbm;
+                if (status == SX126X_STATUS_OK) 
+                {
+                    ESP_LOGI(TAG, "Packet Status - SNR: %d, RSSI: %d, Signal RSSI: %d", pkt_metrics->snr_db, pkt_metrics->rssi_dbm, pkt_metrics->signal_rssi_dbm);
+                }
+                else 
+                {
+                    ESP_LOGE(TAG, "Failed to get packet status: %d", status); // TODO - add specific error prints depending on the status code (see GetPacketStatus in SX1262 datasheet)
+                }
             }
             if (irq_status & SX126X_IRQ_TIMEOUT) 
             {
@@ -661,7 +682,7 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
         ESP_LOGE(TAG, "Weird case, we didn't get IRQ either for RX_DONE or TIMEOUT - check your interrupt configuration or try increasing the SX1262_RX_IRQ_MARGIN_MS value!");
     }
 
-    /* #05 - Set the radio back to standby mode */
+    /* #06 - Set the radio back to standby mode */
     status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
     if (status != SX126X_STATUS_OK) 
     {
