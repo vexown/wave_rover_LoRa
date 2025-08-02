@@ -13,6 +13,17 @@
 #include "nvs_flash.h"
 #include "web_updater_wifi.h"
 #include "web_updater.h"
+#include "persistent_params.h"
+
+/* You can host a hotspot with these credentials if you don't want to provide your own */
+#define WIFI_SSID_DEFAULT "kekwifi"
+#define WIFI_PASSWORD_DEFAULT "kekpassword"
+/* To update the NVS with your WiFi credentials, provide them in these macros
+ * and use the param_update build environment in platformio.ini 
+ * Then build and flash the firmware. Later, you can change the macro values
+ * back to placeholders and go back to the normal env so you don't accidentally commit your credentials. */
+#define WIFI_SSID "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
 #define RX_TIMEOUT_MS 5000
 
@@ -25,6 +36,7 @@ typedef enum
 {
     INIT_SUCCESS = 0,
     NVS_INIT_FAILED,
+    PARAM_FAILED,
     WIFI_INIT_FAILED,
     I2C_INIT_FAILED,
     OLED_INIT_FAILED,
@@ -112,7 +124,7 @@ static void transceiverMode()
             oled_refresh();
         }
 
-        status = sx1262_receive_packet(rx_payload, rx_payload_len, 5000);
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, RX_TIMEOUT_MS);
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -197,6 +209,7 @@ static init_status_t init_components(void)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
     {
+        ESP_LOGW(TAG, "NVS Flash initialization failed, erasing and reinitializing...");
         /* Erase NVS partition and try to initialize again */
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
@@ -208,9 +221,48 @@ static init_status_t init_components(void)
     }
 
     /* ----------------- #02 - WiFi Initialization ----------------- */
-    const char *wifi_ssid = "StatekMatka_V2";
-    const char *wifi_pass = "TODO"; //TODO, add real password but load it from NVS 
-    bool wifi_status = web_updater_wifi_start(wifi_ssid, wifi_pass);
+    esp_err_t param_status = persistent_params_init_string("wifi_ssid", WIFI_SSID_DEFAULT);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to add WiFi SSID parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+    param_status = persistent_params_init_string("wifi_password", WIFI_PASSWORD_DEFAULT);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to add WiFi Password parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+#ifdef UPDATE_PARAMS_IN_NVS
+    param_status = persistent_params_set_string("wifi_ssid", WIFI_SSID);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to set WiFi SSID parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+    param_status = persistent_params_set_string("wifi_password", WIFI_PASSWORD);
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to set WiFi Password parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+#endif
+    char wifi_ssid[64] = {};
+    char wifi_password[64] = {};
+    param_status = persistent_params_get_string("wifi_ssid", wifi_ssid, sizeof(wifi_ssid));
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to get WiFi SSID parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+    param_status = persistent_params_get_string("wifi_password", wifi_password, sizeof(wifi_password));
+    if (param_status != ESP_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to get WiFi Password parameter: %s", esp_err_to_name(param_status));
+        return PARAM_FAILED;
+    }
+
+    bool wifi_status = web_updater_wifi_start(wifi_ssid, wifi_password);
     if (!wifi_status) 
     {
         ESP_LOGE(TAG, "WiFi initialization failed");
