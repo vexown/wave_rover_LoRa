@@ -33,9 +33,21 @@ def find_firmware_file(path_arg):
         return firmware_path
     
     if len(firmware_files) > 1:
-        print(f"❌ Error: Found {len(firmware_files)} 'firmware.bin' files.")
-        print("   Please specify the correct one using the --file argument.")
-        sys.exit(1)
+        print(f"Found multiple environments with firmware.bin:")
+        for idx, fw in enumerate(firmware_files):
+            env_name = os.path.basename(os.path.dirname(fw))
+            print(f"  [{idx+1}] {env_name}: {fw}")
+        while True:
+            try:
+                choice = int(input("Select the environment to use [number]: "))
+                if 1 <= choice <= len(firmware_files):
+                    firmware_path = firmware_files[choice-1]
+                    print(f"✅ Selected: {firmware_path}")
+                    return firmware_path
+                else:
+                    print("Invalid selection. Try again.")
+            except ValueError:
+                print("Please enter a valid number.")
 
     print(f"❌ Error: Could not find 'firmware.bin' in any environment within '{build_dir}'.")
     sys.exit(1)
