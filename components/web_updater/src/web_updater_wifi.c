@@ -8,6 +8,7 @@
 #include <mdns.h>
 #include <esp_log.h>
 #include "web_updater.h"
+#include <esp_sntp.h>
 
 #define MDNS_HOSTNAME "esp32-ota"
 
@@ -93,8 +94,14 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         ESP_LOGI("wifi_event", "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
 
         /* Now that we have an IP, we can start services that need it */
+        /* Start MDNS */
         start_mdns_service();
+        /* Start the web updater */
         web_updater_start();
+        /* Initialize SNTP */
+        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+        esp_sntp_setservername(0, "pool.ntp.org");
+        esp_sntp_init();
     }
     else
     {
