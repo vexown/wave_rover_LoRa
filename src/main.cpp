@@ -13,6 +13,7 @@
 #include "web_updater_wifi.h"
 #include "web_updater.h"
 #include "persistent_params.h"
+#include "logger.h"
 
 /* WiFi Credentials */
 /* To update the NVS with your WiFi credentials, provide them in the appropriate macros in the platformio.ini file
@@ -217,6 +218,8 @@ static void receiverMode()
             snprintf(metrics_str, sizeof(metrics_str), "RSSI[sig]: %d dBm", pkt_metrics.signal_rssi_dbm);
             oled_write_string(3, metrics_str);
             oled_refresh();
+
+            send_lora_to_firebase(pkt_metrics.rssi_dbm, pkt_metrics.snr_db, (const char*)rx_payload, 0, 0);
         }
     }
 }
