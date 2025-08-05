@@ -20,6 +20,14 @@
 
 #define MAX_LORA_PAYLOAD_LENGTH 255 // Maximum payload length for LoRa packets (uint8_t)
 
+/* Device modes */
+/* To change the device mode, select appropriate mode in platformio.ini and use the param_update build environment.
+ * The device mode is stored in NVS, so you can change it later without reflashing the firmware. */
+#define RECEIVER_MODE 0
+#define TRANSMITTER_MODE 1
+#define TRANSCEIVER_MODE 2
+#define DEVICE_MODE_DEFAULT RECEIVER_MODE
+
 #include <stdint.h>
 
 typedef struct 

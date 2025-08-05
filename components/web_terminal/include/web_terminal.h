@@ -26,12 +26,6 @@ esp_err_t web_terminal_stop(void);
  */
 esp_err_t web_terminal_send_message(const char *message);
 
-/**
- * @brief Set callback function for handling received commands
- * @param callback Function to call when a command is received
- */
-void web_terminal_set_command_callback(void (*callback)(const char *command));
-
 #ifdef __cplusplus
 }
 #endif

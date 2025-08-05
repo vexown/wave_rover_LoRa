@@ -7,14 +7,16 @@
 #include "freertos/queue.h"
 #include <string.h>
 #include <sys/param.h>
+#include "persistent_params.h"
+#include "sx1262_interface.hpp"
+#include "esp_chip_info.h"
+#include "esp_timer.h"
+#include "esp_flash.h"
 
 static const char *TAG = "WEB_TERMINAL";
 
 /* HTTP Server handle */
 static httpd_handle_t server = NULL;
-
-/* Command callback function pointer */
-static void (*command_callback)(const char *command) = NULL;
 
 /* Queue for storing messages to send to clients */
 static QueueHandle_t message_queue = NULL;
@@ -108,6 +110,8 @@ static const char web_terminal_html[] =
 "</body>"
 "</html>";
 
+static void web_terminal_command_handler(const char *command);
+
 /* HTTP GET handler for the main terminal page */
 static esp_err_t terminal_get_handler(httpd_req_t *req)
 {
@@ -146,12 +150,9 @@ static esp_err_t command_post_handler(httpd_req_t *req)
             
             ESP_LOGI(TAG, "Received command: %s", command_start);
             
-            /* Call the command callback if set */
-            if (command_callback) 
-            {
-                command_callback(command_start);
-            }
-            
+            /* Call the command callback to handle the command */
+            web_terminal_command_handler(command_start);
+
             /* Send response */
             httpd_resp_set_type(req, "application/json");
             char response[128];
@@ -285,7 +286,81 @@ esp_err_t web_terminal_send_message(const char *message)
     return ESP_FAIL;
 }
 
-void web_terminal_set_command_callback(void (*callback)(const char *command))
+/* Web Terminal Command Handler */
+static void web_terminal_command_handler(const char *command)
 {
-    command_callback = callback;
+    ESP_LOGI(TAG, "Processing web terminal command: %s", command);
+    
+    if (strcmp(command, "help") == 0) 
+    {
+        web_terminal_send_message("Available commands:");
+        web_terminal_send_message("  help - Show this help message");
+        web_terminal_send_message("  status - Show system status");
+        web_terminal_send_message("  set_msg <message> - Change LoRa payload");
+        web_terminal_send_message("  restart - Restart the ESP32");
+        web_terminal_send_message("  info - Show device information");
+    }
+    else if (strcmp(command, "status") == 0) 
+    {
+        char status_msg[128];
+        int32_t device_mode = 0;
+        (void)persistent_params_get_integer("device_mode", &device_mode);
+
+        snprintf(status_msg, sizeof(status_msg), "Device Mode: %s", 
+                device_mode == TRANSMITTER_MODE ? "Transmitter" :
+                device_mode == RECEIVER_MODE ? "Receiver" : 
+                device_mode == TRANSCEIVER_MODE ? "Transceiver" : "Unknown");
+        web_terminal_send_message(status_msg);
+        
+        snprintf(status_msg, sizeof(status_msg), "Free heap: %d bytes", (int)esp_get_free_heap_size());
+        web_terminal_send_message(status_msg);
+        
+        snprintf(status_msg, sizeof(status_msg), "Uptime: %d seconds", (int)(esp_timer_get_time() / 1000000));
+        web_terminal_send_message(status_msg);
+    }
+    else if (strncmp(command, "set_msg ", 8) == 0) 
+    {
+        const char *message = command + 8; /* Skip "set_msg " */
+        if (strlen(message) > 0) 
+        {
+            /* Change period LoRa message here TODO */
+        } 
+        else 
+        {
+            web_terminal_send_message("Error: No message provided");
+        }
+    }
+    else if (strcmp(command, "restart") == 0) 
+    {
+        web_terminal_send_message("Restarting ESP32 in 3 seconds...");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        esp_restart();
+    }
+    else if (strcmp(command, "info") == 0) 
+    {
+        esp_chip_info_t chip_info;
+        esp_chip_info(&chip_info);
+        
+        char info_msg[128];
+        snprintf(info_msg, sizeof(info_msg), "ESP32 Model: %s", 
+                chip_info.model == CHIP_ESP32 ? "ESP32" :
+                chip_info.model == CHIP_ESP32S2 ? "ESP32-S2" :
+                chip_info.model == CHIP_ESP32S3 ? "ESP32-S3" :
+                chip_info.model == CHIP_ESP32C3 ? "ESP32-C3" : "Unknown");
+        web_terminal_send_message(info_msg);
+        
+        snprintf(info_msg, sizeof(info_msg), "CPU Cores: %d", chip_info.cores);
+        web_terminal_send_message(info_msg);
+
+        uint32_t flash_size = 0;
+        esp_flash_get_size(NULL, &flash_size);
+        snprintf(info_msg, sizeof(info_msg), "Flash Size: %d MB", (int)(flash_size / (1024 * 1024)));
+        web_terminal_send_message(info_msg);
+    }
+    else 
+    {
+        char error_msg[128];
+        snprintf(error_msg, sizeof(error_msg), "Unknown command: %s. Type 'help' for available commands.", command);
+        web_terminal_send_message(error_msg);
+    }
 }

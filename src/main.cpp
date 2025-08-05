@@ -3,6 +3,10 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_chip_info.h"
+#include "esp_flash.h"
+#include "esp_timer.h"
 #include <string.h>
 #include "sx1262_interface.hpp"
 #include "driver/i2c_master.h"
@@ -14,23 +18,7 @@
 #include "web_updater.h"
 #include "persistent_params.h"
 #include "logger.h"
-
-/* WiFi Credentials */
-/* To update the NVS with your WiFi credentials, provide them in the appropriate macros in the platformio.ini file
- * and use the param_update build environment.
- * Then build and flash the firmware. Later, you can change the macro values
- * back to placeholders and go back to the normal env so you don't accidentally commit your credentials. */
-/* You can host a hotspot with these credentials if you don't want to provide your own */
-#define WIFI_SSID_DEFAULT "kekwifi"
-#define WIFI_PASSWORD_DEFAULT "kekpassword"
-
-/* Device modes */
-/* To change the device mode, select appropriate mode in platformio.ini and use the param_update build environment.
- * The device mode is stored in NVS, so you can change it later without reflashing the firmware. */
-#define RECEIVER_MODE 0
-#define TRANSMITTER_MODE 1
-#define TRANSCEIVER_MODE 2
-#define DEVICE_MODE_DEFAULT RECEIVER_MODE
+#include "web_terminal.h"
 
 /* Misc defines */
 #define RX_TIMEOUT_MS 5000
@@ -43,7 +31,8 @@ typedef enum
     WIFI_INIT_FAILED,
     I2C_INIT_FAILED,
     OLED_INIT_FAILED,
-    SX1262_INIT_FAILED
+    SX1262_INIT_FAILED,
+    WEB_TERMINAL_INIT_FAILED
 } init_status_t;
 
 /* Select the mode of operation (stored in NVS, use param_update env in platformio.ini to change it) */
@@ -62,6 +51,7 @@ static init_status_t init_components(void);
 static void transmitterMode(void);
 static void receiverMode(void);
 static void transceiverMode(void);
+static void web_terminal_command_handler(const char *command);
 
 void app_main(void)
 {
@@ -371,5 +361,21 @@ static init_status_t init_components(void)
         ESP_LOGI(TAG, "SX1262 Initialized successfully.");
     }
 
-    return INIT_SUCCESS; // All components initialized successfully
+    /* ----------------- #07 - Web Terminal Initialization ----------------- */
+    ESP_LOGI(TAG, "Initializing Web Terminal...");
+    esp_err_t web_terminal_status = web_terminal_start();
+    if (web_terminal_status != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to initialize Web Terminal: %s", esp_err_to_name(web_terminal_status));
+        return WEB_TERMINAL_INIT_FAILED;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Web Terminal initialized successfully.");
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Wait a bit for web terminal to start
+        web_terminal_send_message("Wave Rover LoRa Web Terminal started!");
+    }
+
+    return INIT_SUCCESS; /* All components initialized successfully */
 }
+
