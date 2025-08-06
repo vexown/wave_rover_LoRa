@@ -13,6 +13,8 @@
 #include "esp_timer.h"
 #include "esp_flash.h"
 
+extern char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH];
+
 static const char *TAG = "WEB_TERMINAL";
 
 /* HTTP Server handle */
@@ -296,7 +298,7 @@ static void web_terminal_command_handler(const char *command)
         web_terminal_send_message("Available commands:");
         web_terminal_send_message("  help - Show this help message");
         web_terminal_send_message("  status - Show system status");
-        web_terminal_send_message("  set_msg <message> - Change LoRa payload");
+        web_terminal_send_message("  setMsg <message> - Change LoRa payload");
         web_terminal_send_message("  restart - Restart the ESP32");
         web_terminal_send_message("  info - Show device information");
     }
@@ -318,12 +320,14 @@ static void web_terminal_command_handler(const char *command)
         snprintf(status_msg, sizeof(status_msg), "Uptime: %d seconds", (int)(esp_timer_get_time() / 1000000));
         web_terminal_send_message(status_msg);
     }
-    else if (strncmp(command, "set_msg ", 8) == 0) 
+    else if (strncmp(command, "setMsg ", strlen("setMsg ")) == 0) 
     {
-        const char *message = command + 8; /* Skip "set_msg " */
-        if (strlen(message) > 0) 
+        const char *message = command + strlen("setMsg "); /* Skip "setMsg " */
+        if ((strlen(message) > 0) && (strlen(message) < MAX_LORA_PAYLOAD_LENGTH))
         {
-            /* Change period LoRa message here TODO */
+            strncpy(LoRaMessageGlobal, message, MAX_LORA_PAYLOAD_LENGTH);
+            LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH - 1] = '\0'; // just to be safe
+            web_terminal_send_message("LoRa message updated successfully");
         } 
         else 
         {

@@ -35,6 +35,8 @@ typedef enum
     WEB_TERMINAL_INIT_FAILED
 } init_status_t;
 
+char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH] = "Hello from Wave Rover LoRa!"; // Default message to send
+
 /* Select the mode of operation (stored in NVS, use param_update env in platformio.ini to change it) */
 static int32_t device_mode;
 
@@ -96,8 +98,7 @@ static void transceiverMode()
 {
     sx126x_status_t status;
 
-    char message[] = "Yo from SX1262#1";
-    uint8_t payload_len = strlen(message);
+    uint8_t payload_len = strlen(LoRaMessageGlobal);
     uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {}; // Buffer for received data
     uint8_t rx_payload_len = sizeof(rx_payload);
     lora_packet_metrics_t pkt_metrics = {};
@@ -105,7 +106,7 @@ static void transceiverMode()
 
     while (1) 
     {
-        status = sx1262_send_packet((uint8_t*)message, payload_len);
+        status = sx1262_send_packet((uint8_t*)LoRaMessageGlobal, payload_len);
         if (status != SX126X_STATUS_OK) 
         {
             ESP_LOGE(TAG, "Failed to send packet: %d", status);
@@ -114,7 +115,7 @@ static void transceiverMode()
         {
             oled_clear_buffer();
             oled_write_string(0, "Sent:");
-            oled_write_string_multiline(1, message);
+            oled_write_string_multiline(1, LoRaMessageGlobal);
             oled_refresh();
         }
 
@@ -145,17 +146,11 @@ static void transmitterMode()
 {
     sx126x_status_t status;
 
-    char message[MAX_LORA_PAYLOAD_LENGTH + 1] = {};
-    for (int i = 0; i < MAX_LORA_PAYLOAD_LENGTH; ++i) 
-    {
-        message[i] = 'A' + (i % 26);
-    }
-    message[MAX_LORA_PAYLOAD_LENGTH] = '\0';
-    uint8_t payload_len = strlen(message);
+    uint8_t payload_len = strlen(LoRaMessageGlobal);
 
     while (1) 
     {
-        status = sx1262_send_packet((uint8_t*)message, payload_len);
+        status = sx1262_send_packet((uint8_t*)LoRaMessageGlobal, payload_len);
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -168,7 +163,7 @@ static void transmitterMode()
             (void)control_external_LED(true);
             oled_clear_buffer();
             oled_write_string(0, "Sent:");
-            oled_write_string_multiline(1, message);
+            oled_write_string_multiline(1, LoRaMessageGlobal);
             oled_refresh();
         }
 
