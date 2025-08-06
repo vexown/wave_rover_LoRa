@@ -51,7 +51,6 @@ static init_status_t init_components(void);
 static void transmitterMode(void);
 static void receiverMode(void);
 static void transceiverMode(void);
-static void web_terminal_command_handler(const char *command);
 
 void app_main(void)
 {
