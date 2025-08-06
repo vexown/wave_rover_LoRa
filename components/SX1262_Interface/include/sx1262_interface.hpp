@@ -17,8 +17,13 @@
  */
 
 #include "sx126x.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #define MAX_LORA_PAYLOAD_LENGTH 255 // Maximum payload length for LoRa packets (uint8_t)
+
+/* Mutex for protecting LoRaMessageGlobal access */
+extern SemaphoreHandle_t lora_message_mutex;
 
 /* Device modes */
 /* To change the device mode, select appropriate mode in platformio.ini and use the param_update build environment.
@@ -74,5 +79,33 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length);
 sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, lora_packet_metrics_t* pkt_metrics, uint32_t rx_timeout_ms);
 
 esp_err_t control_external_LED(bool state);
+
+/* Thread-safe LoRa message access functions */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief Thread-safe function to get the current LoRa message
+ * 
+ * @param buffer Buffer to copy the message into
+ * @param buffer_size Size of the buffer
+ * @param timeout_ms Timeout in milliseconds to wait for mutex
+ * @return esp_err_t ESP_OK on success, ESP_FAIL on failure
+ */
+esp_err_t lora_message_get_safe(char* buffer, size_t buffer_size, uint32_t timeout_ms);
+
+/**
+ * @brief Thread-safe function to set the LoRa message
+ * 
+ * @param message New message to set
+ * @param timeout_ms Timeout in milliseconds to wait for mutex
+ * @return esp_err_t ESP_OK on success, ESP_FAIL on failure
+ */
+esp_err_t lora_message_set_safe(const char* message, uint32_t timeout_ms);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // SX1262_INTERFACE_H

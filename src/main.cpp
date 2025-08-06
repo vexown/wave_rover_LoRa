@@ -37,6 +37,9 @@ typedef enum
 
 char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH] = "Hello from Wave Rover LoRa!"; // Default message to send
 
+/* Mutex for protecting LoRaMessageGlobal access */
+SemaphoreHandle_t lora_message_mutex = NULL;
+
 /* Select the mode of operation (stored in NVS, use param_update env in platformio.ini to change it) */
 static int32_t device_mode;
 
@@ -97,8 +100,8 @@ void app_main(void)
 static void transceiverMode()
 {
     sx126x_status_t status;
-
-    uint8_t payload_len = strlen(LoRaMessageGlobal);
+    char message_buffer[MAX_LORA_PAYLOAD_LENGTH];
+    uint8_t payload_len;
     uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {}; // Buffer for received data
     uint8_t rx_payload_len = sizeof(rx_payload);
     lora_packet_metrics_t pkt_metrics = {};
@@ -106,7 +109,18 @@ static void transceiverMode()
 
     while (1) 
     {
-        status = sx1262_send_packet((uint8_t*)LoRaMessageGlobal, payload_len);
+        // Get message and send packet (thread-safe)
+        if (lora_message_get_safe(message_buffer, sizeof(message_buffer), 1000) == ESP_OK)
+        {
+            payload_len = strlen(message_buffer);
+            status = sx1262_send_packet((uint8_t*)message_buffer, payload_len);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to get LoRa message in transceiverMode");
+            status = SX126X_STATUS_ERROR;
+        }
+        
         if (status != SX126X_STATUS_OK) 
         {
             ESP_LOGE(TAG, "Failed to send packet: %d", status);
@@ -115,7 +129,7 @@ static void transceiverMode()
         {
             oled_clear_buffer();
             oled_write_string(0, "Sent:");
-            oled_write_string_multiline(1, LoRaMessageGlobal);
+            oled_write_string_multiline(1, message_buffer);
             oled_refresh();
         }
 
@@ -145,12 +159,23 @@ static void transceiverMode()
 static void transmitterMode()
 {
     sx126x_status_t status;
-
-    uint8_t payload_len = strlen(LoRaMessageGlobal);
+    char message_buffer[MAX_LORA_PAYLOAD_LENGTH];
+    uint8_t payload_len;
 
     while (1) 
     {
-        status = sx1262_send_packet((uint8_t*)LoRaMessageGlobal, payload_len);
+        // Get message and send packet (thread-safe)
+        if (lora_message_get_safe(message_buffer, sizeof(message_buffer), 1000) == ESP_OK)
+        {
+            payload_len = strlen(message_buffer);
+            status = sx1262_send_packet((uint8_t*)message_buffer, payload_len);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to get LoRa message in transmitterMode");
+            status = SX126X_STATUS_ERROR;
+        }
+        
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -163,7 +188,7 @@ static void transmitterMode()
             (void)control_external_LED(true);
             oled_clear_buffer();
             oled_write_string(0, "Sent:");
-            oled_write_string_multiline(1, LoRaMessageGlobal);
+            oled_write_string_multiline(1, message_buffer);
             oled_refresh();
         }
 
@@ -210,6 +235,15 @@ static void receiverMode()
 
 static init_status_t init_components(void)
 {
+    /* ----------------- #00 - Mutex Initialization ----------------- */
+    lora_message_mutex = xSemaphoreCreateMutex();
+    if (lora_message_mutex == NULL)
+    {
+        ESP_LOGE(TAG, "Failed to create LoRa message mutex");
+        return INIT_SUCCESS; // We'll treat this as non-fatal for now
+    }
+    ESP_LOGI(TAG, "LoRa message mutex created successfully");
+
     /* ----------------- #01 - NVS Initialization ----------------- */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
@@ -371,5 +405,51 @@ static init_status_t init_components(void)
     }
 
     return INIT_SUCCESS; /* All components initialized successfully */
+}
+
+/* Thread-safe LoRa message access functions */
+extern "C" {
+
+esp_err_t lora_message_get_safe(char* buffer, size_t buffer_size, uint32_t timeout_ms)
+{
+    if (buffer == NULL || buffer_size == 0 || lora_message_mutex == NULL)
+    {
+        return ESP_FAIL;
+    }
+    
+    if (xSemaphoreTake(lora_message_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+    {
+        strncpy(buffer, LoRaMessageGlobal, buffer_size - 1);
+        buffer[buffer_size - 1] = '\0';
+        xSemaphoreGive(lora_message_mutex);
+        return ESP_OK;
+    }
+    
+    return ESP_FAIL;
+}
+
+esp_err_t lora_message_set_safe(const char* message, uint32_t timeout_ms)
+{
+    if (message == NULL || lora_message_mutex == NULL)
+    {
+        return ESP_FAIL;
+    }
+    
+    if (strlen(message) >= MAX_LORA_PAYLOAD_LENGTH)
+    {
+        return ESP_FAIL;
+    }
+    
+    if (xSemaphoreTake(lora_message_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+    {
+        strncpy(LoRaMessageGlobal, message, MAX_LORA_PAYLOAD_LENGTH);
+        LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH - 1] = '\0';
+        xSemaphoreGive(lora_message_mutex);
+        return ESP_OK;
+    }
+    
+    return ESP_FAIL;
+}
+
 }
 
