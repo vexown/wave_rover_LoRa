@@ -130,7 +130,7 @@ blocks:
     decimation: '1'
     disable_channelization: 'False'
     disable_drift_correction: 'False'
-    implicit: 'False'
+    implicit: 'True'
     maxoutbuf: '0'
     minoutbuf: '0'
     reduced_rate: 'False'
