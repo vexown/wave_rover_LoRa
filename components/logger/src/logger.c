@@ -44,7 +44,7 @@ void send_lora_to_firebase(int rssi, float snr, const char* packet_data, uint32_
     cJSON_AddNumberToObject(json, "spreading_factor", spreading_factor);
 
     /* #04 - Add device info (optional) */
-    cJSON_AddStringToObject(json, "device_id", "heltec_v3_001"); /* TODO customize this with a param */
+    cJSON_AddStringToObject(json, "device_id", "WaveRoverLoRa");
 
     /* #05 - Convert JSON object to string */
     char *json_string = cJSON_Print(json);
