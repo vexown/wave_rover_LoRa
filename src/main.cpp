@@ -91,9 +91,10 @@ void app_main(void)
         transceiverMode();
     }
     else
-    {
-        ESP_LOGE(TAG, "Invalid device mode selected!");
-        while(1) vTaskDelay(pdMS_TO_TICKS(1000)); // Forever block execution if invalid mode (TODO - handle it more gracefully)
+    { // if invalid mode selected, go to receiver mode
+        ESP_LOGE(TAG, "Invalid device mode selected! Changing to Receiver Mode...");
+        device_mode = RECEIVER_MODE;
+        receiverMode();
     }
 }
 
