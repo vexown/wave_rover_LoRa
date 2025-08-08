@@ -175,7 +175,7 @@ static void sx126x_hal_wait_on_busy(void)
  */
 sx126x_hal_status_t sx126x_hal_write(const void* context, const uint8_t* command, const uint16_t command_length, const uint8_t* data, const uint16_t data_length)
 {
-    (void)context; // Unused parameter (TODO - find out if we need this)
+    (void)context;
     esp_err_t ret;
     spi_transaction_t trans = 
     {
@@ -232,7 +232,7 @@ sx126x_hal_status_t sx126x_hal_write(const void* context, const uint8_t* command
  */
 sx126x_hal_status_t sx126x_hal_read(const void* context, const uint8_t* command, const uint16_t command_length, uint8_t* data, const uint16_t data_length)
 {
-    (void)context; // Unused parameter (TODO - find out if we need this)
+    (void)context;
     esp_err_t ret;
     spi_transaction_t trans = 
     {
@@ -314,7 +314,7 @@ sx126x_hal_status_t sx126x_hal_read(const void* context, const uint8_t* command,
  */
 sx126x_hal_status_t sx126x_hal_reset(const void* context)
 {
-    (void)context; // Unused parameter (TODO - find out if we need this)
+    (void)context;
 
     if (sx126x_hal_init() != ESP_OK) 
     {
@@ -340,7 +340,7 @@ sx126x_hal_status_t sx126x_hal_reset(const void* context)
  */
 sx126x_hal_status_t sx126x_hal_wakeup(const void* context)
 {
-    (void)context; // Unused parameter (TODO - find out if we need this)
+    (void)context;
 
     if (sx126x_hal_init() != ESP_OK) 
     {
