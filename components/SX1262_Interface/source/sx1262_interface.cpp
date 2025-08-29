@@ -286,6 +286,7 @@ sx126x_status_t sx1262_init_lora(void)
     ESP_LOGI(TAG, "Configuring LoRa modulation...");
     lora_mod_params = 
     {
+        /* TODO - make these dynamically updatable with your phone via some REST commands */
         .sf = SX126X_LORA_SF7,
         .bw = SX126X_LORA_BW_125,
         .cr = SX126X_LORA_CR_4_5,
