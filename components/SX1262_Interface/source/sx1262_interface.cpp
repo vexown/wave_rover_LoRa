@@ -27,7 +27,6 @@
 #define LDRO_ENABLED            0x01
 #define LDRO_DISABLED           0x00
 #define TIMEOUT_DISABLED        0x00
-#define RX_CONTINOUS_MODE       0xFFFFFFFF
 /* Extra margin (in ms) added to the RX timeout when waiting for the DIO1 IRQ semaphore.
  * This accounts for system scheduling delays, SPI latency, and ensures we don't miss the IRQ event.
  * Increase if you observe missed IRQs or false timeouts on slower systems. */
@@ -583,15 +582,23 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
     /* This command sets the chip in RX mode, waiting for the reception of one or several packets. The receiver mode operates with a timeout
      * to provide maximum flexibility to end users */
     ESP_LOGI(TAG, "Setting radio to receive mode...");
-    /* Timeout options:
-     * - If set to 0 - No timeout. The device stays in RX Mode until a reception occurs and the devices return in STBY_RC mode upon completion.
-     * - If set to 0xFFFFFFFF - Rx Continuous mode. The device remains in RX mode until the host sends a command to change the operation mode. 
-     *   The device can receive several packets. Each time a packet is received, a packet done indication is given to the host and the device 
-     *   automatically searches for a new packet
-     * - If set to anything in between - Timeout active. The device remains in RX mode, it returns automatically to STBY_RC mode on timer
-     *   end-of-count or when a packet has been received. As soon as a packet is detected, the timer is automatically disabled to allow complete 
-     *   reception of the packet. The maximum timeout is then 262s 
-     */
+
+    if (rx_timeout_ms == SX126X_RX_SINGLE_MODE)
+    {
+        ESP_LOGI(TAG, "RX single mode (waiting forever) is not supported by sx1262_receive_packet function - defaulting to max timeout...");
+        rx_timeout_ms = SX126X_MAX_TIMEOUT_IN_MS;
+    }
+    else if (rx_timeout_ms == SX126X_RX_CONTINUOUS)
+    {
+        ESP_LOGW(TAG, "RX continuous mode not supported by sx1262_receive_packet function - defaulting to max timeout...");
+        rx_timeout_ms = SX126X_MAX_TIMEOUT_IN_MS;
+    }
+    else if (rx_timeout_ms > SX126X_MAX_TIMEOUT_IN_MS)
+    {
+        ESP_LOGW(TAG, "RX timeout value too high - defaulting to max timeout...");
+        rx_timeout_ms = SX126X_MAX_TIMEOUT_IN_MS;
+    }
+
     status = sx126x_set_rx(context, rx_timeout_ms);
     if (status != SX126X_STATUS_OK) 
     {
@@ -616,7 +623,7 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
 
     /* #03 - Wait for the reception to complete which will be signaled by RX_DONE IRQ (or to timeout which is also signaled by an IRQ) */
     bool rx_success = false;
-    TickType_t dio1_sem_block_time = (rx_timeout_ms == RX_CONTINOUS_MODE) ? portMAX_DELAY : pdMS_TO_TICKS(rx_timeout_ms + SX1262_RX_IRQ_MARGIN_MS); //avoid overflow in case of continuous RX mode
+    TickType_t dio1_sem_block_time = pdMS_TO_TICKS(rx_timeout_ms + SX1262_RX_IRQ_MARGIN_MS); // will not overflow due to guards at the start of the func
     if (xSemaphoreTake(dio1_sem, dio1_sem_block_time) == pdTRUE) 
     {
         sx126x_irq_mask_t irq_status;
@@ -700,6 +707,43 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
         ESP_LOGI(TAG, "Reception completed successfully and radio is back in standby mode.");
         return SX126X_STATUS_OK; // Return success if reception was successful
     }
+}
+
+sx126x_status_t sx1262_get_rssi_instant(int16_t* rssi_dbm)
+{
+    /* Get instantaneous RSSI - must be called while in RX mode */
+    sx126x_status_t status = sx126x_get_rssi_inst(context, rssi_dbm);
+    if (status == SX126X_STATUS_OK) 
+    {
+        ESP_LOGI(TAG, "Instantaneous RSSI: %d dBm", *rssi_dbm);
+    }
+    else 
+    {
+        ESP_LOGE(TAG, "Failed to get instantaneous RSSI: %d", status);
+    }
+    
+    return status;
+}
+
+sx126x_status_t sx1262_set_continuous_rx(void)
+{
+    ESP_LOGI(TAG, "Setting radio to continuous RX mode...");
+    
+    /* Rx Continuous mode. The device remains in RX mode until the host sends a command to change the operation mode. 
+     * The device can receive several packets. Each time a packet is received, a packet done indication is given to the host and the device 
+     * automatically searches for a new packet. Useful for continuous monitoring applications but also for noise level measurements. 
+     * As per sx126.h we need to use the sx126x_set_rx_with_timeout_in_rtc_step() function to achieve this mode. Regular sx126x_set_rx won't work. */
+    sx126x_status_t status = sx126x_set_rx_with_timeout_in_rtc_step(context, SX126X_RX_CONTINUOUS);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Failed to set continuous RX mode: %d", status);
+    }
+    else 
+    {
+        ESP_LOGI(TAG, "Radio successfully set to continuous RX mode");
+    }
+    
+    return status;
 }
 
 esp_err_t control_external_LED(bool state)

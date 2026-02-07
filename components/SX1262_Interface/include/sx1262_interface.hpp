@@ -80,6 +80,28 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
 
 esp_err_t control_external_LED(bool state);
 
+/**
+ * @brief Get the instantaneous RSSI value
+ * 
+ * @param[out] rssi_dbm Pointer to store the RSSI value in dBm
+ * 
+ * @note This function must be called while the radio is in RX mode
+ * 
+ * @returns SX126X_STATUS_OK on success, error code otherwise
+ */
+sx126x_status_t sx1262_get_rssi_instant(int16_t* rssi_dbm);
+
+/**
+ * @brief Set the radio into continuous RX mode
+ * 
+ * @details In continuous RX mode, the radio remains in receive mode indefinitely
+ * until explicitly commanded to change modes. Useful for noise measurements
+ * or continuous monitoring.
+ * 
+ * @returns SX126X_STATUS_OK on success, error code otherwise
+ */
+sx126x_status_t sx1262_set_continuous_rx(void);
+
 /* Thread-safe LoRa message access functions */
 #ifdef __cplusplus
 extern "C" {
