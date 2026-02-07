@@ -201,6 +201,25 @@ static void receiverMode()
 {
     sx126x_status_t status;
 
+#ifdef NOISE_LEVEL_MEASUREMENT
+    int16_t rssi_instant_dbm = 0;
+    ESP_LOGI(TAG, "NOISE LEVEL MEASUREMENT MODE");
+    status = sx1262_set_continuous_rx();
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "CRITICAL: Failed to set radio to continuous RX mode: %d", status);
+        vTaskDelete(NULL);
+        return;
+    }
+    while (1) 
+    {
+        /* Get instantaneous RSSI (noise floor when no signal present) */
+        status = sx1262_get_rssi_instant(&rssi_instant_dbm);
+        if (status != SX126X_STATUS_OK) ESP_LOGE(TAG, "Failed to read RSSI: %d", status);
+        vTaskDelay(pdMS_TO_TICKS(1000)); // measure noise level every second
+    }
+#else // normal receiver mode with packet reception
+
     uint8_t rx_payload[MAX_LORA_PAYLOAD_LENGTH] = {};
     uint8_t rx_payload_len = sizeof(rx_payload);
     lora_packet_metrics_t pkt_metrics = {};
@@ -232,6 +251,7 @@ static void receiverMode()
             send_lora_to_firebase(pkt_metrics.rssi_dbm, pkt_metrics.snr_db, (const char*)rx_payload, 0, 0);
         }
     }
+#endif
 }
 
 static init_status_t init_components(void)
