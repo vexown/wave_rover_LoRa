@@ -440,6 +440,17 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
         return status;
     }
 
+    /* Sync Word comes after the Preamble and is used to distinguish between different networks
+     * Default for private LoRa networks is 0x12 (so in registers it will result in 0x1424 based on sx1262 datasheet)
+     * My personal choice for the sync word is 0xAB (in registers it will result in 0xA4B4)  */
+    uint8_t sync_word = 0xAB;
+    status = sx126x_set_lora_sync_word(context, sync_word);
+    if (status != SX126X_STATUS_OK) 
+    {
+        ESP_LOGE(TAG, "Set LoRa sync word failed: %d", status);
+        return status;
+    }
+
     /* #03 - Calculate the Time-on-Air (ToA) for the packet */
     uint32_t time_on_air_ms = sx126x_get_lora_time_on_air_in_ms(&lora_packet_cfg, &lora_mod_params);
     ESP_LOGI(TAG, "Packet ToA is %lu ms", time_on_air_ms);
