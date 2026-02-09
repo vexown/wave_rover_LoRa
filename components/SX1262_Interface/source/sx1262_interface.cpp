@@ -32,56 +32,11 @@
  * Increase if you observe missed IRQs or false timeouts on slower systems. */
 #define SX1262_RX_IRQ_MARGIN_MS 2000
 
-/* ETSI EN 300 220-2 V3.3.1 (2025-01) defines the frequency bands and power limits for "short-range" (more like low-power) (SRD) 
- * sub 1GHz (25MHz - 1000MHz) up to 500mW e.r.p RF devices in Europe (see Annex B for details):
- * https://www.etsi.org/deliver/etsi_en/300200_300299/30022002/03.03.01_30/en_30022002v030301va.pdf 
- * 
- * As for WHERE exactly within the Band to place your carrier frequency:
- * Per ETSI EN 300 220-2, Clause 4.2.3, for equipment where the
- * Permitted Frequency Band (PFB) is not channelized by regulation (band D or band J)
- * the Nominal Operating Frequency (carrier frequency) must always be
- * the mid-point of your specific Operating Channel (OC).
- * 
- * Your "Operating Channel" is defined by the bandwidth of your LoRa signal.
- * 
- * This rule applies regardless of how wide the overall permitted band is.
- * A wider band simply offers flexibility in *where* you place your LoRa
- * operating channel within that band. However, once placed, the carrier
- * for that particular operating channel must remain centered within it.
- * 
- * For example:
- * - If using the 869.400 MHz to 869.650 MHz band (Band O) with a 250 kHz OCW,
- *   the ideal carrier is 869.525 MHz to center the 250 kHz signal within that band.
- * - If using a wider band (e.g., 863 MHz - 870 MHz) and you choose to transmit
- *   a 125 kHz signal centered at 868.1 MHz, your Operating Channel would be
- *   868.0375 MHz to 868.1625 MHz, and 868.1 MHz is its midpoint.
- * 
- * This ensures your signal remains entirely within your chosen operating channel
- * and does not intrude on other frequencies.
- * 
- * Below are the definitions for ETSI bands relevant to what this specific Heltec V3 board is tuned to (says 863-928MHz on the packaging) 
- */
-#define FREQUENCY_ETSI_EN_300_220_BAND_K 864000000 // (864MHz)      863 MHz to 865 MHz 25 mW e.r.p. ≤ 0,1 % duty cycle or polite spectrum access 
-#define FREQUENCY_ETSI_EN_300_220_BAND_L 866500000 // (866.5MHz)    865 MHz to 868 MHz 25 mW e.r.p. ≤ 1 % duty cycle or polite spectrum access
-#define FREQUENCY_ETSI_EN_300_220_BAND_M 868300000 // (868.3MHz)    868,000 MHz to 868,600 MHz 25 mW e.r.p. ≤ 1 % duty cycle or polite spectrum access
-#define FREQUENCY_ETSI_EN_300_220_BAND_N 868950000 // (868.950MHz)  868,700 MHz to 869,200 MHz 25 mW e.r.p. ≤ 0,1 % duty cycle or polite spectrum access
-#define FREQUENCY_ETSI_EN_300_220_BAND_O 869525000 // (869.525MHz)  869,400 MHz to 869,650 MHz 500 mW e.r.p. ≤ 10 % duty cycle or polite spectrum access
-
-/* ETSI EN 300 220-2 also defines the duty cycle limits for the bands (if you don't use Polite Spectrum Access).
- * The duty cycle is the percentage of time a device can transmit within a given period (usually 1 hour).
- * For example, a 1% duty cycle means the device can transmit for 36 seconds in one hour, 10% duty cycle is 6 minutes per hour, etc.
- */
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_K 0.001f // 0.1%
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_L 0.01f  // 1%
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_M 0.01f  // 1%
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N 0.001f // 0.1%
-#define DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O 0.1f   // 10%
-
 /* Variable for storing the timestamp when the next transmission is allowed. */
 static uint32_t next_tx_allowed_time_ms = 0;
 
 /* LoRa modulation parameters, configured during initialization */
-sx126x_mod_params_lora_t lora_mod_params;
+static sx126x_mod_params_lora_t lora_mod_params;
 
 static float current_duty_cycle_ratio = 0.0f;
 
@@ -94,7 +49,68 @@ static inline uint32_t get_time_in_ms(void)
     return pdTICKS_TO_MS(xTaskGetTickCount());
 }
 
-sx126x_status_t sx1262_init_lora(void) 
+sx1262_init_config_t sx1262_get_default_init_config(uint32_t freq_hz, float duty_cycle)
+{
+    sx1262_init_config_t config = {};
+    
+    config.frequency_hz = freq_hz;
+    config.standby_mode = SX126X_STANDBY_CFG_RC;
+    config.regulator_mode = SX126X_REG_MODE_DCDC;
+    config.tcxo_voltage = SX126X_TCXO_CTRL_1_8V;
+    config.tcxo_timeout_steps = RTC_10_MS_TIMEOUT_IN_STEPS;
+    config.dio2_rf_switch_ctrl = true;
+    config.packet_type = SX126X_PKT_TYPE_LORA;
+    
+    /* PA config for +22 dBm */
+    config.pa_config.pa_duty_cycle = PA_DUTY_CYCLE_22DBM_SX1262;
+    config.pa_config.hp_max = HP_MAX_22DBM_SX1262;
+    config.pa_config.device_sel = PA_DEVICE_SELECT_SX1262;
+    config.pa_config.pa_lut = PA_LUT_RESERVED;
+    
+    config.tx_power_dbm = TX_POWER_SX1262_DB;
+    config.ramp_time = SX126X_RAMP_1700_US;
+    
+    /* Default LoRa modulation parameters */
+    config.lora_mod_params.sf = SX126X_LORA_SF9;
+    config.lora_mod_params.bw = SX126X_LORA_BW_125;
+    config.lora_mod_params.cr = SX126X_LORA_CR_4_5;
+    config.lora_mod_params.ldro = LDRO_DISABLED;
+    
+    /* IRQ configuration */
+    config.irq_mask = SX126X_IRQ_TX_DONE | SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR | SX126X_IRQ_HEADER_ERROR;
+    
+    config.duty_cycle_ratio = duty_cycle;
+    
+    return config;
+}
+
+sx1262_tx_config_t sx1262_get_default_tx_config(void)
+{
+    sx1262_tx_config_t config = {};
+    
+    config.preamble_length_symbols = PREAMBLE_LENGTH_8_SYMBOLS;
+    config.header_type = SX126X_LORA_PKT_EXPLICIT;
+    config.crc_enabled = true;
+    config.invert_iq = false;  // Standard IQ for uplink
+    config.sync_word = 0xAB;   // Custom sync word
+    
+    return config;
+}
+
+sx1262_rx_config_t sx1262_get_default_rx_config(uint32_t timeout_ms)
+{
+    sx1262_rx_config_t config = {};
+    
+    config.preamble_length_symbols = PREAMBLE_LENGTH_8_SYMBOLS;
+    config.header_type = SX126X_LORA_PKT_EXPLICIT;
+    config.crc_enabled = true;
+    config.invert_iq = false;  // Standard IQ for uplink reception
+    config.rx_timeout_ms = timeout_ms;
+    
+    return config;
+}
+
+sx126x_status_t sx1262_init_lora(const sx1262_init_config_t* config) 
 {
     sx126x_status_t status;
 
@@ -128,7 +144,7 @@ sx126x_status_t sx1262_init_lora(void)
      * is suitable for time-critical applications. When switching from STDBY_RC to STDBY_XOSC,
      * the DC-DC automatically switches ON if previously enabled. */
     ESP_LOGI(TAG, "Setting standby mode...");
-    status = sx126x_set_standby(context, SX126X_STANDBY_CFG_RC);
+    status = sx126x_set_standby(context, config->standby_mode);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set standby failed: %d", status);
@@ -140,7 +156,7 @@ sx126x_status_t sx1262_init_lora(void)
      * SX126X_REG_MODE_DCDC: Uses the DC-DC converter, more power-efficient for extended battery life.
      * DC-DC is clocked by RC 13MHz oscillator and activates automatically when entering STDBY_XOSC if enabled in STDBY_RC.*/
     ESP_LOGI(TAG, "Configuring regulator...");
-    status = sx126x_set_reg_mode(context, SX126X_REG_MODE_DCDC);
+    status = sx126x_set_reg_mode(context, config->regulator_mode);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set regulator failed: %d", status);
@@ -156,7 +172,7 @@ sx126x_status_t sx1262_init_lora(void)
      * The timeout is given in RTC steps. Real Time Clock (RTC) is a 64kHz RC oscillator meaning each step is 15.625 µs.
      * 10ms timeout = 10000 / 15.625 = 640 steps. */
     ESP_LOGI(TAG, "Configuring TCXO...");
-    status = sx126x_set_dio3_as_tcxo_ctrl(context, SX126X_TCXO_CTRL_1_8V, RTC_10_MS_TIMEOUT_IN_STEPS);
+    status = sx126x_set_dio3_as_tcxo_ctrl(context, config->tcxo_voltage, config->tcxo_timeout_steps);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set TCXO control failed: %d", status);
@@ -171,7 +187,7 @@ sx126x_status_t sx1262_init_lora(void)
      * radio signal from its internal power amplifier to the antenna during transmission, and conversely, connect the antenna
      * to its low-noise amplifier during reception. This ensures the signal goes to the correct part of the radio at the right time. */
     ESP_LOGI(TAG, "Configuring DIO2 as RF switch...");
-    status = sx126x_set_dio2_as_rf_sw_ctrl(context, true);
+    status = sx126x_set_dio2_as_rf_sw_ctrl(context, config->dio2_rf_switch_ctrl);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set DIO2 RF switch failed: %d", status);
@@ -185,7 +201,7 @@ sx126x_status_t sx1262_init_lora(void)
      * - BPSK: Binary Phase Shift Keying (less commonly highlighted in datasheet for this chip).
      * - LR_FHSS: Long Range Frequency Hopping Spread Spectrum for LPWAN, improving coexistence. */
     ESP_LOGI(TAG, "Setting LoRa packet type...");
-    status = sx126x_set_pkt_type(context, SX126X_PKT_TYPE_LORA);
+    status = sx126x_set_pkt_type(context, config->packet_type);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set packet type failed: %d", status);
@@ -195,37 +211,16 @@ sx126x_status_t sx1262_init_lora(void)
     /* #07 - Set the RF frequency */
     /* The actual LoRa transciever (SX1262) supports 150-960 MHz range but this particular 
      * Heltec V3 board is tuned to 863-928MHz as it says on the packaging */ 
-    uint32_t freq_in_hz = FREQUENCY_ETSI_EN_300_220_BAND_O;
-    status = sx126x_set_rf_freq(context, freq_in_hz);
+    status = sx126x_set_rf_freq(context, config->frequency_hz);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set RF frequency failed: %d", status);
         return status;
     }
 
-    /* #07a - Set the Duty Cycle limit based on the frequency band */
-    switch(freq_in_hz)
-    {
-        case FREQUENCY_ETSI_EN_300_220_BAND_K:
-            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_K;
-            break;
-        case FREQUENCY_ETSI_EN_300_220_BAND_L:
-            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_L;
-            break;
-        case FREQUENCY_ETSI_EN_300_220_BAND_M:
-            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_M;
-            break;
-        case FREQUENCY_ETSI_EN_300_220_BAND_N:
-            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_N;
-            break;
-        case FREQUENCY_ETSI_EN_300_220_BAND_O:
-            current_duty_cycle_ratio = DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O;
-            break;
-        default:
-            ESP_LOGE(TAG, "No duty cycle defined for frequency %lu Hz!", freq_in_hz);
-            return SX126X_STATUS_ERROR;
-    }
-    ESP_LOGI(TAG, "Operating on frequency %lu Hz with a %.1f%% duty cycle.", freq_in_hz, (current_duty_cycle_ratio * 100.0f));
+    /* #07a - Store the duty cycle ratio */
+    current_duty_cycle_ratio = config->duty_cycle_ratio;
+    ESP_LOGI(TAG, "Operating on frequency %lu Hz with a %.1f%% duty cycle.", config->frequency_hz, (current_duty_cycle_ratio * 100.0f));
 
     /* #08 - Set the PA (Power Amplifier) configuration */
     /* The PA config parameters as per SX1262 datasheet (13.1.14 SetPaConfig):
@@ -235,22 +230,14 @@ sx126x_status_t sx1262_init_lora(void)
      *     - pa_lut: Reserved parameter. (Always set to 0x01) 
      * 
      * For advice on optimal PA configuration, refer to the SX1262 datasheet Table 13-21: PA Operating Modes with Optimal Settings */
-    ESP_LOGI(TAG, "Configuring PA for +22 dBm (158.49mW)...");
+    ESP_LOGI(TAG, "Configuring PA for +%d dBm...", config->tx_power_dbm);
     /*********************************************************************************************************************************************************
      * WARNING - Make sure the ERP (Effective Radiated Power) does not exceed the legal limits for your region in the selected frequency band (refer to ETSI EN 300 220-2).
      *********************************************************************************************************************************************************
      For example, in Europe for band O (869,400 MHz to 869,650 MHz) the max ERP is 500 mW and ≤ 10 % duty cycle or polite spectrum access
      * In this case assuming there are no cable losses between the SX1262 chip and the antenna, and the antenna has 0 dBd gain, 
      * then the ERP will be no more than 158.49 mW which is well within the legal limits for this particular band. */
-    sx126x_pa_cfg_params_t pa_config = 
-    {
-        .pa_duty_cycle = PA_DUTY_CYCLE_22DBM_SX1262,
-        .hp_max = HP_MAX_22DBM_SX1262,     
-        .device_sel = PA_DEVICE_SELECT_SX1262, 
-        .pa_lut = PA_LUT_RESERVED
-    };
-
-    status = sx126x_set_pa_cfg(context, &pa_config);
+    status = sx126x_set_pa_cfg(context, &config->pa_config);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set PA config failed: %d", status);
@@ -263,8 +250,8 @@ sx126x_status_t sx1262_init_lora(void)
      *      - power parameter is connected to the PA config above and its value is suggestedin the Table 13-21: PA Operating Modes with Optimal Settings. 
      *      - ramp_time parameter defines the time it takes for the PA to ramp up to full power. They don't really suggest any specific values in the datasheet,
      *        TODO - find out how to choose this value */
-    ESP_LOGI(TAG, "Setting TX power to +22 dBm (158.49mW)...");
-    status = sx126x_set_tx_params(context, (int8_t)TX_POWER_SX1262_DB, SX126X_RAMP_1700_US);
+    ESP_LOGI(TAG, "Setting TX power to +%d dBm...", config->tx_power_dbm);
+    status = sx126x_set_tx_params(context, config->tx_power_dbm, config->ramp_time);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set TX params failed: %d", status);
@@ -283,15 +270,7 @@ sx126x_status_t sx1262_init_lora(void)
      *      Time-on-Air" on page 41 ) in order to allow the receiver to have a better tracking of the LoRa signal. Depending on the payload size, the low
      *      data rate optimization is usually recommended when a LoRa symbol time is equal or above 16.38ms.*/
     ESP_LOGI(TAG, "Configuring LoRa modulation...");
-    lora_mod_params = 
-    {
-        /* TODO - make these dynamically updatable with your phone via some REST commands */
-        .sf = SX126X_LORA_SF7,
-        .bw = SX126X_LORA_BW_125,
-        .cr = SX126X_LORA_CR_4_5,
-        .ldro = LDRO_DISABLED
-    };
-
+    lora_mod_params = config->lora_mod_params;
     status = sx126x_set_lora_mod_params(context, &lora_mod_params);
     if (status != SX126X_STATUS_OK) 
     {
@@ -314,8 +293,8 @@ sx126x_status_t sx1262_init_lora(void)
      * DIO1 is used for various interrupts, including RX Done, TX Done, and other events. */
     ESP_LOGI(TAG, "Configuring IRQs...");
     status = sx126x_set_dio_irq_params( context,
-                                        SX126X_IRQ_TX_DONE | SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR | SX126X_IRQ_HEADER_ERROR,
-                                        SX126X_IRQ_TX_DONE | SX126X_IRQ_RX_DONE | SX126X_IRQ_TIMEOUT | SX126X_IRQ_CRC_ERROR | SX126X_IRQ_HEADER_ERROR,
+                                        config->irq_mask,
+                                        config->irq_mask,
                                         0,
                                         0
                                     );
@@ -329,10 +308,16 @@ sx126x_status_t sx1262_init_lora(void)
 }
 
 
-sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
+sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length, const sx1262_tx_config_t* config)
 {
     sx126x_status_t status;
     sx126x_pkt_params_lora_t lora_packet_cfg;
+
+    if (config == NULL)
+    {
+        ESP_LOGE(TAG, "Invalid config pointer!");
+        return SX126X_STATUS_ERROR;
+    }
 
     /* #01 - Check Duty Cycle compliance */
     uint32_t current_time_ms = get_time_in_ms();
@@ -347,10 +332,10 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
     /* #02 - Define the configuration for the LoRa packet and apply it */
     ESP_LOGI(TAG, "Configuring LoRa packet parameters...");
     /* Set general LoRa packet configuraton*/
-    lora_packet_cfg.preamble_len_in_symb = PREAMBLE_LENGTH_8_SYMBOLS;
-    lora_packet_cfg.header_type = SX126X_LORA_PKT_EXPLICIT;
+    lora_packet_cfg.preamble_len_in_symb = config->preamble_length_symbols;
+    lora_packet_cfg.header_type = config->header_type;
     lora_packet_cfg.pld_len_in_bytes = payload_length;
-    lora_packet_cfg.crc_is_on = true;
+    lora_packet_cfg.crc_is_on = config->crc_enabled;
     /* I/Q config */
     /* ## What is the point of I/Q signaling?
     *
@@ -431,7 +416,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
     * - `false`: Use standard I/Q. For a transmitter, this generates UP-CHIRPS. For a receiver, this listens for UP-CHIRPS. (Typical for LoRaWAN uplinks).
     * - `true`: Use inverted I/Q. For a transmitter, this generates DOWN-CHIRPS. For a receiver, this listens for DOWN-CHIRPS. (Typical for LoRaWAN downlinks).
     */
-    lora_packet_cfg.invert_iq_is_on = false; // Configure for standard IQ (e.g., for transmitting an uplink)
+    lora_packet_cfg.invert_iq_is_on = config->invert_iq;
   
     status = sx126x_set_lora_pkt_params(context, &lora_packet_cfg);
     if (status != SX126X_STATUS_OK) 
@@ -443,8 +428,7 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
     /* Sync Word comes after the Preamble and is used to distinguish between different networks
      * Default for private LoRa networks is 0x12 (so in registers it will result in 0x1424 based on sx1262 datasheet)
      * My personal choice for the sync word is 0xAB (in registers it will result in 0xA4B4)  */
-    uint8_t sync_word = 0xAB;
-    status = sx126x_set_lora_sync_word(context, sync_word);
+    status = sx126x_set_lora_sync_word(context, config->sync_word);
     if (status != SX126X_STATUS_OK) 
     {
         ESP_LOGE(TAG, "Set LoRa sync word failed: %d", status);
@@ -584,10 +568,18 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length)
     }
 }
 
-sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, lora_packet_metrics_t* pkt_metrics, uint32_t rx_timeout_ms)
+sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, lora_packet_metrics_t* pkt_metrics, const sx1262_rx_config_t* config)
 {
     sx126x_status_t status;
     sx126x_pkt_params_lora_t lora_packet_cfg;
+
+    if (config == NULL)
+    {
+        ESP_LOGE(TAG, "Invalid config pointer!");
+        return SX126X_STATUS_ERROR;
+    }
+
+    uint32_t rx_timeout_ms = config->rx_timeout_ms;
 
     /* #01 - Set the radio in receiver mode */
     /* This command sets the chip in RX mode, waiting for the reception of one or several packets. The receiver mode operates with a timeout
@@ -619,11 +611,11 @@ sx126x_status_t sx1262_receive_packet(uint8_t* payload, uint8_t payload_length, 
 
     /* #02 - Define the configuration for the LoRa packet and apply it */
     ESP_LOGI(TAG, "Configuring the expected LoRa packet parameters...");
-    lora_packet_cfg.preamble_len_in_symb = PREAMBLE_LENGTH_8_SYMBOLS;
-    lora_packet_cfg.header_type = SX126X_LORA_PKT_EXPLICIT;
+    lora_packet_cfg.preamble_len_in_symb = config->preamble_length_symbols;
+    lora_packet_cfg.header_type = config->header_type;
     lora_packet_cfg.pld_len_in_bytes = payload_length;
-    lora_packet_cfg.crc_is_on = true;
-    lora_packet_cfg.invert_iq_is_on = false; // Configure for standard IQ (e.g., for transmitting an uplink)
+    lora_packet_cfg.crc_is_on = config->crc_enabled;
+    lora_packet_cfg.invert_iq_is_on = config->invert_iq;
   
     status = sx126x_set_lora_pkt_params(context, &lora_packet_cfg);
     if (status != SX126X_STATUS_OK) 

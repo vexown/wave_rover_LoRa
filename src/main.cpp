@@ -107,6 +107,10 @@ static void transceiverMode()
     uint8_t rx_payload_len = sizeof(rx_payload);
     lora_packet_metrics_t pkt_metrics = {};
     char metrics_str[64] = {};
+    
+    /* Get default TX and RX configurations */
+    sx1262_tx_config_t tx_config = sx1262_get_default_tx_config();
+    sx1262_rx_config_t rx_config = sx1262_get_default_rx_config(RX_TIMEOUT_MS);
 
     while (1) 
     {
@@ -114,7 +118,7 @@ static void transceiverMode()
         if (lora_message_get_safe(message_buffer, sizeof(message_buffer), 1000) == ESP_OK)
         {
             payload_len = strlen(message_buffer);
-            status = sx1262_send_packet((uint8_t*)message_buffer, payload_len);
+            status = sx1262_send_packet((uint8_t*)message_buffer, payload_len, &tx_config);
         }
         else
         {
@@ -134,7 +138,7 @@ static void transceiverMode()
             oled_refresh();
         }
 
-        status = sx1262_receive_packet(rx_payload, rx_payload_len, &pkt_metrics, RX_TIMEOUT_MS);
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, &pkt_metrics, &rx_config);
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -162,6 +166,8 @@ static void transmitterMode()
     sx126x_status_t status;
     char message_buffer[MAX_LORA_PAYLOAD_LENGTH];
     uint8_t payload_len;
+    
+    sx1262_tx_config_t tx_config = sx1262_get_default_tx_config();
 
     while (1) 
     {
@@ -169,7 +175,7 @@ static void transmitterMode()
         if (lora_message_get_safe(message_buffer, sizeof(message_buffer), 1000) == ESP_OK)
         {
             payload_len = strlen(message_buffer);
-            status = sx1262_send_packet((uint8_t*)message_buffer, payload_len);
+            status = sx1262_send_packet((uint8_t*)message_buffer, payload_len, &tx_config);
         }
         else
         {
@@ -224,10 +230,12 @@ static void receiverMode()
     uint8_t rx_payload_len = sizeof(rx_payload);
     lora_packet_metrics_t pkt_metrics = {};
     char metrics_str[64] = {};
+    
+    sx1262_rx_config_t rx_config = sx1262_get_default_rx_config(RX_TIMEOUT_MS);
 
     while (1) 
     {
-        status = sx1262_receive_packet(rx_payload, rx_payload_len, &pkt_metrics, RX_TIMEOUT_MS);
+        status = sx1262_receive_packet(rx_payload, rx_payload_len, &pkt_metrics, &rx_config);
         if (status != SX126X_STATUS_OK) 
         {
             (void)control_external_LED(false);
@@ -399,7 +407,14 @@ static init_status_t init_components(void)
 
     /* ----------------- #06 - SX1262 Initialization ----------------- */
     ESP_LOGI(TAG, "Initializing SX1262...");
-    sx126x_status_t status = sx1262_init_lora();
+    
+    /* Get default initialization configuration for ETSI Band O */
+    sx1262_init_config_t sx1262_config = sx1262_get_default_init_config(
+        FREQUENCY_ETSI_EN_300_220_BAND_O, 
+        DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O
+    );
+    
+    sx126x_status_t status = sx1262_init_lora(&sx1262_config);
     if (status != SX126X_STATUS_OK)
     {
         ESP_LOGE(TAG, "Failed to initialize SX1262: %d", status);
