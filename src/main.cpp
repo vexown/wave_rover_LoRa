@@ -413,6 +413,8 @@ static init_status_t init_components(void)
         FREQUENCY_ETSI_EN_300_220_BAND_O, 
         DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O
     );
+    sx1262_config.lora_mod_params.sf = SX126X_LORA_SF9;
+    sx1262_config.lora_mod_params.bw = SX126X_LORA_BW_062;
     
     sx126x_status_t status = sx1262_init_lora(&sx1262_config);
     if (status != SX126X_STATUS_OK)
