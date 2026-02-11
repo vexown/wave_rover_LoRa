@@ -35,7 +35,7 @@ typedef enum
     WEB_TERMINAL_INIT_FAILED
 } init_status_t;
 
-char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH] = "Hello from Wave Rover LoRa!"; // Default message to send
+char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH] = "HELLOLORA"; // Default message to send
 
 /* Mutex for protecting LoRaMessageGlobal access */
 SemaphoreHandle_t lora_message_mutex = NULL;
