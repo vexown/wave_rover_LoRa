@@ -169,6 +169,7 @@ static void transmitterMode()
     
     sx1262_tx_config_t tx_config = sx1262_get_default_tx_config();
     tx_config.sync_word = 0x7F;
+    tx_config.crc_enabled = true;
 
     while (1) 
     {
