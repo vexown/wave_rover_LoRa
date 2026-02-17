@@ -27,8 +27,8 @@ def byte_to_bits_lsb_first(byte):
 def bits_to_int_lsb_first(bits):
     return sum(bit << i for i, bit in enumerate(bits))
 
-# Whitening (9-bit LFSR, described in the Semtech AN1200.18
-# https://semtech.my.salesforce.com/sfc/p/#E0000000JelG/a/2R000000HSOn/5O4_iba4ULdi6rfa1q7oENCQ9LGFWGwTjS32Loibdoo
+# Whitening (9-bit LFSR, described in section 6.2.3.4 "Whitening" of the SX1262 datasheet)
+# Although some sources imply the actual algorithm is different, so verify this.
 def whiten_bits(bits, lfsr_init):
     lfsr = lfsr_init[:]
     out = []
