@@ -35,13 +35,13 @@ import os
 
 # ─────────────────────────── USER PARAMETERS ──────────────────────────────── #
 
-INPUT_BYTES = bytes([0xA3])   # Payload to encode (arbitrary length)
+INPUT_BYTES = bytes([0x54])   # Payload to encode (arbitrary length)
 SF          = 8               # Spreading Factor: 7–12
 CR          = 4               # Coding Rate parity bits: 1–4  (gives 4/(4+CR))
 BW          = 125_000         # Channel bandwidth in Hz
 SAMPLE_RATE = 2_400_000       # Output sample rate (must be ≥ BW)
 F_OFFSET    = 200_000         # Shift signal away from DC (Hz)
-SYNC_WORD   = 0x34            # 0x34 = public / LoRaWAN network
+SYNC_WORD   = 0x7F            # my personal sync word
 EXPORT_MODE = 'iq'            # 'iq' (stereo float32) or 'real' (mono float32)
 OUT_DIR     = 'lora_out'
 OUT_PREFIX  = f'lora_SF{SF}_CR{CR}'
