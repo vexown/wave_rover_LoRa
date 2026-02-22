@@ -336,85 +336,20 @@ sx126x_status_t sx1262_send_packet(uint8_t* payload, uint8_t payload_length, con
     lora_packet_cfg.header_type = config->header_type;
     lora_packet_cfg.pld_len_in_bytes = payload_length;
     lora_packet_cfg.crc_is_on = config->crc_enabled;
-    /* I/Q config */
-    /* ## What is the point of I/Q signaling?
-    *
-    * Transmitting data by directly manipulating a high-frequency radio carrier is complex and inefficient.
-    * I/Q signaling provides a much smarter way to modulate a carrier wave.
-    *
-    * The core idea is to represent any signal in terms of two simpler, lower-frequency (baseband) signals:
-    * (baseband refers to the original range of frequencies occupied by a signal before it's modulated onto 
-    * a higher frequency carrier for transmission over long distances or wireless channels.)
-    * In-phase (I) and Quadrature (Q). Any signal s(t) can be described by its amplitude A(t) and phase phi(t)
-    * relative to a carrier frequency f_c. In plain text, the formula is:
-    *
-    * s(t) = A(t) * cos(2*pi*f_c*t + phi(t))
-    *
-    * Using trigonometric identities, this can be rewritten into the I/Q form, which is what modulators actually implement:
-    *
-    * s(t) = I(t) * cos(2*pi*f_c*t) - Q(t) * sin(2*pi*f_c*t)
-    *
-    * Where the baseband I(t) and Q(t) signals are defined by the signal's overall amplitude and phase:
-    *
-    * I(t) = A(t) * cos(phi(t))  // The In-phase component
-    * Q(t) = A(t) * sin(phi(t))  // The Quadrature component
-    *
-    * This shows that by simply generating two baseband signals, I(t) and Q(t), and mixing them with cosine and sine
-    * versions of the carrier, we can create any form of modulation (AM, FM, PM, QAM, etc.). This simplifies hardware
-    * design immensely and provides a universal method for modulation.
-    *
-    * ---
-    *
-    * ## How LoRa Uses I/Q
-    *
-    * LoRa modulation uses I (In-phase) and Q (Quadrature) components to generate the chirps (the signals that sweep
-    * up or down in frequency) which encode the data.
-    *
-    * 1.  Carrier Generation: A single high-frequency carrier signal is generated. This carrier is then split into two identical signals.
-    * 2.  Phase Shift: One of these carrier signals is phase-shifted by 90 degrees. This creates two orthogonal carriers. By convention,
-    *     the original is the IN-PHASE (I) CARRIER (cosine) and the shifted one is the QUADRATURE (Q) CARRIER (sine). They are in quadrature
-    *     because they are 90 degrees out of phase.
-    * 3.  Baseband Signals: The baseband I and Q signals for LoRa are sinusoids whose frequency determines the chirp rate.
-    * 4.  Mixing: The baseband 'I' signal is multiplied (mixed) with the in-phase carrier (cosine wave). The baseband 'Q' signal is multiplied with
-    *     the quadrature carrier (sine wave).
-    * 5.  Summation: The two resulting signals are added together. This sum forms the final LoRa signal, which is a chirp.
-    *
-    * The power of this approach is that any form of modulation can be performed simply by varying the amplitude and phase of the baseband I and Q 
-    * signals before mixing and summation. For example, to create a phase shift in the final signal, you just need to change the relative amplitudes 
-    * of the I and Q signals.
-    *
-    * A classic example is Quadrature Phase-Shift Keying (QPSK). If the I and Q data streams are bipolar (e.g., +1V or -1V), we can create four distinct states:
-    *
-    * - I positive, Q positive
-    * - I positive, Q negative
-    * - I negative, Q positive
-    * - I negative, Q negative
-    *
-    * When summed, these four I/Q states produce four unique phase shifts (e.g., 45°, 135°, 225°, 315°), allowing 2 bits of data to be sent per symbol. While LoRa is not QPSK, the underlying I/Q principle is the same.
-    *
-    * ---
-    *
-    * ## Why does LoRa need to configure IQ inversion?
-    *
-    * In LoRa, the standard chirp is an UP-CHIRP, where frequency increases over the symbol time. This is generated with a standard I/Q signal pair.
-    *
-    * By inverting the Q component of the baseband signal, the direction of phase rotation is reversed, which in turn flips the frequency sweep. 
-    * This creates a DOWN-CHIRP, where frequency decreases over the symbol time.
-    *
-    * This inversion is critical for network operation, primarily to distinguish between data traffic directions:
-    *
+    /* This inversion is critical for network operation, primarily to distinguish between data traffic directions.
+    * A typical LoRaWAN network convention is as below but for private LoRa networks you can choose either way as long as the Tx and Rx settings match:
     * - UPLINK (Device to Gateway): Typically uses standard, non-inverted I/Q to produce UP-CHIRPS.
     * - DOWNLINK (Gateway to Device): Typically uses inverted I/Q to produce DOWN-CHIRPS.
+    * 
+    *  Key point - device configured as Standard IQ will IGNORE Inverted IQ packets and vice versa. This is the main point of IQ inversion in LoRa - 
+    *  it allows the same radio to differentiate between uplink and downlink traffic by simply switching the I/Q configuration.
     *
-    * A receiver must know what kind of chirp to listen for. If a gateway is expecting an uplink packet (UP-CHIRPS), its radio must be configured 
-    * to detect UP-CHIRPS. When that same gateway transmits a downlink response, it switches its configuration to send DOWN-CHIRPS.
+    *  Therefore, a receiver MUST be configured with the SAME IQ setting as the transmitter it is listening to. If the settings mismatch 
+    *  (e.g., Rx expects UP-CHIRPS but Tx sends DOWN-CHIRPS), the packet will not be detected.
     *
-    * Therefore, a receiver MUST be configured with the SAME IQ setting as the transmitter it is listening to. If the settings mismatch 
-    * (e.g., Rx expects UP-CHIRPS but Tx sends DOWN-CHIRPS), the packet will not be detected.
-    *
-    * The `invert_iq_is_on` flag controls this behavior.
-    * - `false`: Use standard I/Q. For a transmitter, this generates UP-CHIRPS. For a receiver, this listens for UP-CHIRPS. (Typical for LoRaWAN uplinks).
-    * - `true`: Use inverted I/Q. For a transmitter, this generates DOWN-CHIRPS. For a receiver, this listens for DOWN-CHIRPS. (Typical for LoRaWAN downlinks).
+    *  The `invert_iq_is_on` flag controls this behavior.
+    *   - `false`: Use standard I/Q. 
+    *   - `true`: Use inverted I/Q. 
     */
     lora_packet_cfg.invert_iq_is_on = config->invert_iq;
   
