@@ -85,9 +85,9 @@
 #   2. Run:  bash capture_rtl_sdr_v4.sh
 #   3. Wait for the capture to finish (default: 10 seconds).
 #   4. Analyse the result with the companion Python script:
-#        python3 lora_symbol_observer.py
+#        python3 lora_get_symbol_value_FFT.py
 #      Make sure MODE = 'file' and IQ_FILE = 'last_capture.npy' are set in
-#      that script (see Tools/lora_symbol_observer.py).
+#      that script (see Tools/lora_get_symbol_value_FFT.py).
 #
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -186,6 +186,6 @@ EOF
 echo
 echo "Capture and conversion complete."
 echo "Next step:"
-echo "  python3 lora_symbol_observer.py"
+echo "  python3 lora_get_symbol_value_FFT.py"
 echo
 echo "Ensure MODE = 'file' and IQ_FILE = '${OUTPUT_NPY}' in the script."

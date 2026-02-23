@@ -103,6 +103,8 @@ from scipy.io import wavfile
 import matplotlib.pyplot as plt
 import sys
 import time
+import argparse
+import json
 
 # ═══════════════════════════════════════════════════════════════════════
 #  CONFIGURATION
@@ -314,6 +316,28 @@ def get_peak_bin(spectrum: np.ndarray) -> float:
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════==
 def main():
+    # ── CLI argument parsing ──────────────────────────────────────────
+    parser = argparse.ArgumentParser(
+        description="LoRa Symbol Observer — dechirp IQ capture and extract chip values."
+    )
+    parser.add_argument(
+        '--no-plot', action='store_true', default=False,
+        help='Suppress matplotlib plots (for headless / pipeline use).'
+    )
+    parser.add_argument(
+        '--save-symbols', type=str, default=None, metavar='PATH',
+        help='Save extracted symbol data to a JSON file at PATH.'
+    )
+    parser.add_argument(
+        '--iq-file', type=str, default=None,
+        help=f'Override IQ_FILE config (default: {IQ_FILE}).'
+    )
+    args = parser.parse_args()
+
+    show_plots = PLOT and not args.no_plot
+    save_path  = args.save_symbols
+    iq_file    = args.iq_file if args.iq_file else IQ_FILE
+
     N = 1 << SF   # 256 samples per symbol at chip rate for SF=8
 
     # ── 1. Acquire (file-based) ────────────────────────────────────────
@@ -324,8 +348,8 @@ def main():
         # and run this script with MODE = 'file'.
         raise RuntimeError("Live SDR capture is disabled. Run capture_rtl.sh and set MODE='file'.")
     else:
-        print(f"  Loading {IQ_FILE} …")
-        raw = load_from_file(IQ_FILE)
+        print(f"  Loading {iq_file} …")
+        raw = load_from_file(iq_file)
 
     # Quick sanity check: ensure we loaded something reasonable
     if raw is None or len(raw) == 0:
@@ -543,7 +567,7 @@ def main():
     print(f"\nCorrected chip values (offset subtracted):")
     print(f"{'Sym':>4}  {'Raw bin':>7}  {'Corrected':>9}  Notes")
     print("-" * 45)
-    for i, (raw, cor) in enumerate(zip(chip_values, corrected)):
+    for i, (raw_bin, cor) in enumerate(zip(chip_values, corrected)):
         if   i < best_start:
             note = '(pre-burst)'
         elif i < best_start + best_len:
@@ -554,10 +578,59 @@ def main():
             note = '← downchirp / freq-sync'
         else:
             note = ''
-        print(f"{i:4}  {raw:7.1f}  {cor:9.1f}  {note}")
-        
+        print(f"{i:4}  {raw_bin:7.1f}  {cor:9.1f}  {note}")
+
+    # ── 4c. Save symbol data to JSON ─────────────────────────────────
+    if save_path:
+        symbols = []
+        for i, (raw_bin, cor, pmr) in enumerate(zip(chip_values, corrected, peak_means)):
+            # Classify each symbol's role in the frame
+            if i < best_start:
+                role = 'pre-burst'
+            elif i < best_start + best_len:
+                role = 'preamble'
+            elif i < best_start + best_len + 2:
+                role = 'sync'
+            elif i < best_start + best_len + 5:
+                role = 'downchirp'
+            elif i < best_start + best_len + 5 + (SF - 2):
+                role = 'header'
+            else:
+                role = 'payload'
+
+            symbols.append({
+                'index':           i,
+                'raw_bin':         round(raw_bin, 2),
+                'corrected_bin':   round(cor, 2),
+                'peak_mean_ratio': round(pmr, 2),
+                'role':            role,
+            })
+
+        output = {
+            'config': {
+                'sf':           SF,
+                'bw':           BW,
+                'sample_rate':  SAMPLE_RATE,
+                'center_freq':  CENTER_FREQ,
+                'f_offset':     F_OFFSET,
+                'n_bins':       N,
+            },
+            'calibration': {
+                'freq_offset_bins': round(freq_offset_bins, 3),
+                'freq_offset_hz':   round(freq_offset_hz, 2),
+                'ppm_error':        round(freq_offset_ppm, 3),
+                'preamble_start':   best_start,
+                'preamble_length':  best_len,
+            },
+            'symbols': symbols,
+        }
+
+        with open(save_path, 'w') as f:
+            json.dump(output, f, indent=2)
+        print(f"\nSymbol data saved to: {save_path}")
+
     # ── 5. Plots ──────────────────────────────────────────────────────
-    if PLOT and spectra:
+    if show_plots and spectra:
 
         # SPECTROGRAM — raw signal, no dechirping
         # Shows the actual frequency content of each symbol over time.
