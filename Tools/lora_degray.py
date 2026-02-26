@@ -8,9 +8,14 @@ applies Gray decoding to each corrected chip value.
 
 LoRa Gray coding (Robyns et al. 2018, §2.1, Eq. 2)
 ────────────────────────────────────────────────────
-The transmitter applies Gray *inverse* (decoding) to the symbol value before
+The transmitter applies Gray inverse (decoding) to the symbol value before
 modulating it onto a chirp.  After dechirping + FFT at the receiver, the
-resulting bin index is therefore Gray-*encoded*.
+resulting bin index is therefore Gray-encoded.
+
+The naming here is confusing but think of it this way:
+The symbol values are defined in Gray-code domain. 
+The TX needs to leave that domain (decode) to get a physical shift. 
+The RX needs to enter that domain (encode) to recover the symbol
 
 To recover the original symbol value we apply standard Gray encoding to the
 bin index (which is the same operation as Gray decoding of the value):
