@@ -5,7 +5,7 @@
 #
 #  Stage 1: Capture IQ samples from RTL-SDR   → last_capture.npy
 #  Stage 2: Dechirp & extract symbol values   → lora_symbols.json
-#  Stage 3: Gray decode chip values            → lora_symbols_gray.json
+#  Stage 3: Recover symbol values (Gray encode bins) → lora_symbols_gray.json
 #  Stage 4: (future) Deinterleave, decode FEC, recover payload bytes
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
@@ -67,19 +67,19 @@ echo
 echo "Symbol data saved to: lora_symbols.json"
 echo
 
-# ── Stage 3: Gray decoding ────────────────────────────────────────────────────
+# ── Stage 3: Recover symbol values (Gray encode bin indices) ──────────────────
 echo "════════════════════════════════════════════════════════════════"
-echo "  Stage 3: Gray decoding corrected chip values"
+echo "  Stage 3: Recovering symbol values (gray_encode of FFT bins)"
 echo "════════════════════════════════════════════════════════════════"
-python3 "${SCRIPT_DIR}/lora_degray.py" lora_symbols.json -o lora_symbols_gray.json
+python3 "${SCRIPT_DIR}/lora_gray_coding.py" lora_symbols.json -o lora_symbols_gray.json
 
 if [ ! -f "lora_symbols_gray.json" ]; then
-    echo "ERROR: Gray decoding failed — lora_symbols_gray.json not created."
+    echo "ERROR: Symbol value recovery failed — lora_symbols_gray.json not created."
     exit 1
 fi
 
 echo
-echo "Gray-decoded data saved to: lora_symbols_gray.json"
+echo "Symbol value data saved to: lora_symbols_gray.json"
 echo
 
 # ── Stage 4: (placeholder) Deinterleave, decode FEC, recover payload bytes ────

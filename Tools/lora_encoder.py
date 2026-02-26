@@ -22,7 +22,8 @@ Processing pipeline (paper Figure 5 / Section 2):
     ④ Pad codeword list to SF entries (zero-fill)
     ⑤ Diagonal interleave into SF × (4+CR) chip matrix            [§2.2]
     ⑥ Each matrix row → integer symbol value (LSB-first)
-    ⑦ Gray-inverse encode  →  time-shift index for the chirp      [§2.1]
+    ⑦ Gray-decode symbol value → chirp time-shift index            [§2.1]
+       (gray_decode = Gray→binary; the RX reverses this with gray_encode)
     ⑧ Modulate: roll base upchirp by shift index                  [§2.1]
     ⑨ Prepend: preamble + frame-sync + freq-sync                  [§2.4]
     ⑩ Upsample, apply carrier offset, write IQ WAV
@@ -270,20 +271,34 @@ def interleave(codewords: list[list[int]], sf: int) -> list[list[int]]:
 #  The paper defines demodulation as:
 #    i = Gray( argmax |FFT( x(t+t̂) · x̄(t) )| )
 #
-#  So the receiver applies Gray *encoding* to the FFT argmax to recover symbol i.
-#  Working backwards, the transmitter must apply Gray *inverse* (decoding) to
-#  symbol i to obtain the time-shift index t̂ that rolls the base chirp.
+#  So the receiver applies Gray *encoding* (binary→Gray: x ^ (x>>1)) to the
+#  FFT argmax to recover symbol i.  Working backwards, the transmitter must
+#  apply Gray *inverse* / *decoding* (Gray→binary) to symbol i to obtain the
+#  time-shift index t̂ that rolls the base chirp.
 #
-#    encode path:  shift = gray_inverse(symbol_value)
-#    decode path:  symbol_value = gray_encode(argmax_fft)
+#  ⚠ Naming trap: "encode" / "decode" refer to the Gray-code operation,
+#    NOT to the TX/RX role.  The TX uses gray_decode and the RX uses
+#    gray_encode.  See lora_gray_coding.py's docstring for the full picture.
+#
+#    TX:  chirp_shift   = gray_decode(symbol_value)   [Gray→binary]
+#    RX:  symbol_value   = gray_encode(bin_index)      [binary→Gray]
 # ─────────────────────────────────────────────────────────────────────────────
 
 def gray_encode(v: int) -> int:
-    """Standard binary-reflected Gray encoding: G(v) = v ⊕ (v >> 1)."""
+    """binary → Gray code:  G(v) = v ^ (v >> 1).
+
+    Used by the RX (lora_gray_coding.py) to recover symbol values from
+    FFT bin indices.  Not used in the TX path.
+    """
     return v ^ (v >> 1)
 
 def gray_decode(g: int) -> int:
-    """Standard Gray decoding (inverse): recover binary from Gray code."""
+    """Gray code → binary (inverse of gray_encode).
+
+    Used by the TX to convert symbol values into chirp time-shift indices.
+    The TX applies gray_decode (not gray_encode!) because it is converting
+    FROM Gray-code space (symbol values) INTO natural order (physical shifts).
+    """
     v = g
     mask = v >> 1
     while mask:
@@ -321,8 +336,10 @@ def make_base_upchirp(sf: int, bw: float) -> np.ndarray:
 def modulate_symbol(base_upchirp: np.ndarray, symbol: int) -> np.ndarray:
     """
     Modulate an integer symbol onto the base chirp by circular time shift.
-    symbol is the *gray-decoded* value (i.e. the raw interleaver output
-    passed through gray_decode before calling this function).
+
+    *symbol* is the gray_decode'd value (i.e. the raw interleaver output
+    passed through gray_decode to convert from Gray-code space to a
+    natural-order shift index).  See §5 for the TX/RX Gray-code roles.
     """
     return np.roll(base_upchirp, symbol)
 
@@ -452,8 +469,11 @@ def main():
     chip_values = [bits_lsb_to_int(row) for row in chip_matrix]
     print(f"   Chip values (raw)  : {chip_values}")
 
-    # ── ⑤ Gray-inverse encode to get time-shift indices ───────────────────
-    print("⑤ Gray-inverse encoding …")
+    # ── ⑤ Gray-decode symbol values to get time-shift indices ─────────────
+    #    gray_decode() here = Gray→binary.  The TX "decodes" from Gray-code
+    #    space into natural order so the chirp shift is a plain integer.
+    #    The RX will reverse this with gray_encode() (binary→Gray).
+    print("⑤ Gray-decode → chirp time-shift indices …")
     shifts = [gray_decode(v) for v in chip_values]
     print(f"   Time-shift indices : {shifts}")
 
