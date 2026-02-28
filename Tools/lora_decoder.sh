@@ -79,8 +79,6 @@ if [ ! -f "lora_symbols_gray.json" ]; then
 fi
 
 echo
-echo "Symbol value data saved to: lora_symbols_gray.json"
-echo
 
 # ── Stage 4: (placeholder) Deinterleave, decode FEC, recover payload bytes ────
 echo "════════════════════════════════════════════════════════════════"

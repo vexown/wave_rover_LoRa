@@ -4,7 +4,7 @@ lora_gray_coding.py — Stage 3 of the LoRa decode pipeline
 =====================================================
 
 Reads the symbol data produced by lora_get_symbol_value_FFT.py (JSON) and
-recovery the original symbol values by applying Gray encoding to each
+recovers the original symbol values by applying Gray encoding to each
 FFT bin index.
 
 LoRa Gray coding (Robyns et al. 2018, §2.1, Eq. 2)
