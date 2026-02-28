@@ -278,7 +278,7 @@ def interleave(codewords: list[list[int]], sf: int) -> list[list[int]]:
 #
 #  ⚠ Naming trap: "encode" / "decode" refer to the Gray-code operation,
 #    NOT to the TX/RX role.  The TX uses gray_decode and the RX uses
-#    gray_encode.  See lora_gray_coding.py's docstring for the full picture.
+#    gray_encode.  See lora_gray_encode.py's docstring for the full picture.
 #
 #    TX:  chirp_shift   = gray_decode(symbol_value)   [Gray→binary]
 #    RX:  symbol_value   = gray_encode(bin_index)      [binary→Gray]
@@ -287,7 +287,7 @@ def interleave(codewords: list[list[int]], sf: int) -> list[list[int]]:
 def gray_encode(v: int) -> int:
     """binary → Gray code:  G(v) = v ^ (v >> 1).
 
-    Used by the RX (lora_gray_coding.py) to recover symbol values from
+    Used by the RX (lora_gray_encode.py) to recover symbol values from
     FFT bin indices.  Not used in the TX path.
     """
     return v ^ (v >> 1)

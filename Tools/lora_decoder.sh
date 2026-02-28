@@ -71,7 +71,7 @@ echo
 echo "════════════════════════════════════════════════════════════════"
 echo "  Stage 3: Recovering symbol values (gray_encode of FFT bins)"
 echo "════════════════════════════════════════════════════════════════"
-python3 "${SCRIPT_DIR}/lora_gray_coding.py" lora_symbols.json -o lora_symbols_gray.json
+python3 "${SCRIPT_DIR}/lora_gray_encode.py" lora_symbols.json -o lora_symbols_gray.json
 
 if [ ! -f "lora_symbols_gray.json" ]; then
     echo "ERROR: Symbol value recovery failed — lora_symbols_gray.json not created."

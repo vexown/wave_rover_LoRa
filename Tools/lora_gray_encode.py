@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lora_gray_coding.py — Stage 3 of the LoRa decode pipeline
+lora_gray_encode.py — Stage 3 of the LoRa decode pipeline
 =====================================================
 
 Reads the symbol data produced by lora_get_symbol_value_FFT.py (JSON) and
