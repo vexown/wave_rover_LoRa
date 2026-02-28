@@ -3,10 +3,26 @@
 #  lora_decoder.sh — End-to-end LoRa decode pipeline
 # ══════════════════════════════════════════════════════════════════════════════
 #
-#  Stage 1: Capture IQ samples from RTL-SDR   → last_capture.npy
-#  Stage 2: Dechirp & extract symbol values   → lora_symbols.json
-#  Stage 3: Recover symbol values (Gray encode bins) → lora_symbols_gray.json
-#  Stage 4: (future) Deinterleave, decode FEC, recover payload bytes
+#  Stage 1: Capture IQ samples from RTL-SDR            → last_capture.npy
+#  Stage 2: Dechirp & extract symbol values            → lora_symbols.json
+#  Stage 3: Recover symbol values (Gray encode bins)   → lora_symbols_gray.json
+#  Stage 4: Deinterleave symbols into codewords        → lora_deinterleaved.json
+#  Stage 5: (future) HEADER: Hamming decode
+#  Stage 6: (future) PAYLOAD: dewhiten → Hamming decode
+#  Stage 7: (future) Byte assembly + CRC check
+#
+# ── KNOWN LIMITATIONS ─────────────────────────────────────────────────────────
+#  This pipeline is currently hardcoded for:
+#    • SF = 8
+#    • CR = 4  (coding rate 4/8)
+#    • 1-byte payload
+#    • Explicit header mode
+#  Several values are not yet dynamic:
+#    • N_SYMBOLS (Stage 2) assumes ~32 symbols total (2 pre + 8 preamble +
+#      2 sync + 3 downchirp + 8 header + 8 payload = 31).
+#      Longer payloads or different SF/CR will need a larger N_SYMBOLS.
+#    • Stage 2 symbol role annotations use hardcoded index ranges.
+#    • Stage 4 falls back to CR=4 if the header hasn't been decoded yet.
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
 #   bash lora_decoder.sh              # full pipeline: capture + symbol extraction
@@ -64,8 +80,6 @@ if [ ! -f "lora_symbols.json" ]; then
 fi
 
 echo
-echo "Symbol data saved to: lora_symbols.json"
-echo
 
 # ── Stage 3: Recover symbol values (Gray encode bin indices) ──────────────────
 echo "════════════════════════════════════════════════════════════════"
@@ -80,10 +94,26 @@ fi
 
 echo
 
-# ── Stage 4: (placeholder) Deinterleave, decode FEC, recover payload bytes ────
+# ── Stage 4: Deinterleave symbols into codewords ─────────────────────────────
 echo "════════════════════════════════════════════════════════════════"
-echo "  Stage 4: Decode payload (not yet implemented)"
+echo "  Stage 4: Deinterleaving symbols → codewords"
 echo "════════════════════════════════════════════════════════════════"
-echo "  TODO: deinterleave, header decoding (special case), payload dewhitening, hamming decoding, byte reconstruction"
+python3 "${SCRIPT_DIR}/lora_deinterleave.py" lora_symbols_gray.json -o lora_deinterleaved.json
+
+if [ ! -f "lora_deinterleaved.json" ]; then
+    echo "ERROR: Deinterleave failed — lora_deinterleaved.json not created."
+    exit 1
+fi
+
+echo
+
+# ── Stage 5: (placeholder) Hamming decode header, dewhiten+Hamming payload, bytes, CRC ─
+echo "════════════════════════════════════════════════════════════════"
+echo "  Stage 5+: Remaining decode (not yet implemented)"
+echo "════════════════════════════════════════════════════════════════"
+echo "  TODO: HEADER: Hamming decode"
+echo "        PAYLOAD: dewhiten → Hamming decode"
+echo "        Byte assembly"
+echo "        CRC check"
 echo
 echo "Pipeline complete."

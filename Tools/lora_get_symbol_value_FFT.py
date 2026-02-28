@@ -68,13 +68,14 @@ WHAT TO EXPECT IN A VALID LORA FRAME (SF=8, CR=4/8)
                                Result: these symbols show LOW PMR. This is not
                                an error — it is the expected and correct behaviour.
 
-  Symbols 13–18 (6 symbols)   HEADER  (SF-2 = 6 symbols for SF=8)
+  Symbols 13–20 (8 symbols)   HEADER  (4+CR = 8 symbols, always CR=4)
                                Contains payload length, coding rate, CRC flag.
-                               Transmitted at "reduced rate" (fewer rows in the
-                               interleaving matrix) for extra robustness.
+                               Transmitted at "reduced rate" (only SF−2 = 6 bits
+                               per symbol are used in the interleaving matrix),
+                               but still occupies 4+CR = 8 symbols on air.
                                Looks like normal data symbols in the table.
 
-  Symbols 19+                 PAYLOAD
+  Symbols 21+                 PAYLOAD
                                The actual encoded data bytes. Each row of the
                                interleaving matrix produces one chip value here.
                                For a 1-byte payload at CR=4/8 and SF=8:
@@ -155,8 +156,14 @@ PPM            = 0                  # Frequency correction used during capture (
                                     # Note: many RTL-SDR Blog V4 builds don't support setting
                                     # ppm via software; prefer CLI capture or hardware that supports it.
 
-N_SYMBOLS      = 30                 # Symbols to analyse and print.
-                                    # Full SF=8 frame: ~8+2+3+6+8 = 27 symbols min
+N_SYMBOLS      = 32                 # Symbols to analyse and print.
+                                    # Full SF=8 frame: ~2(pre) + 8(preamble) + 2(sync)
+                                    #   + 3(downchirp) + 8(header) + 8(payload) = 31 min
+                                    #
+                                    # ⚠ HARDCODED for SF=8, CR=4, 1-byte payload.
+                                    #   For longer payloads or different SF/CR, increase
+                                    #   this value.  Ideally compute dynamically from
+                                    #   header decode results.
 
 PLOT           = True               # Show matplotlib plots
 
@@ -482,6 +489,9 @@ def main():
         peak_means.append(peak_mean)
 
         # Heuristic annotations based on symbol index and PMR
+        # ⚠ These index ranges are HARDCODED for SF=8, CR=4, 1-byte payload.
+        #   A different SF/CR/payload length will shift the boundaries.
+        #   TODO: compute from detected preamble position + header decode.
         if   peak_mean < 5.0:
             note = '← noise / no signal'
         elif i <= 1:
@@ -492,7 +502,7 @@ def main():
             note = '← sync symbol'
         elif 12 <= i <= 14:
             note = '← downchirp (low PMR expected)'
-        elif 15 <= i <= 20:
+        elif 15 <= i <= 22:
             note = '← header'
         else:
             note = '← payload'
@@ -593,8 +603,8 @@ def main():
                 role = 'sync'
             elif i < best_start + best_len + 5:
                 role = 'downchirp'
-            elif i < best_start + best_len + 5 + (SF - 2):
-                role = 'header'
+            elif i < best_start + best_len + 5 + (4 + 4):
+                role = 'header'   # header always uses CR=4 → 4+4 = 8 symbols per block
             else:
                 role = 'payload'
 
