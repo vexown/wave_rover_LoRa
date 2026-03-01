@@ -58,8 +58,8 @@ WHAT TO EXPECT IN A VALID LORA FRAME (SF=8, CR=4/8)
                                e.g. sync word 0x7F → hi nibble 0x7, lo nibble 0xF
                                → symbol bins: 0x7 << 4 = 112  and  0xF << 4 = 240
 
-  Symbols 10–12 (~3 symbols)  FREQUENCY SYNC (downchirps)
-                               Two full downchirps + one quarter downchirp.
+  Symbols 10–11 (2 symbols)   FREQUENCY SYNC (downchirps)
+                               Two full downchirps (SX1262 SFD).
                                A downchirp sweeps HIGH to LOW frequency — the
                                opposite of our base upchirp. When we dechirp
                                a downchirp with an upchirp template, the chirp
@@ -68,14 +68,14 @@ WHAT TO EXPECT IN A VALID LORA FRAME (SF=8, CR=4/8)
                                Result: these symbols show LOW PMR. This is not
                                an error — it is the expected and correct behaviour.
 
-  Symbols 13–20 (8 symbols)   HEADER  (4+CR = 8 symbols, always CR=4)
+  Symbols 12–19 (8 symbols)   HEADER  (4+CR = 8 symbols, always CR=4)
                                Contains payload length, coding rate, CRC flag.
                                Transmitted at "reduced rate" (only SF−2 = 6 bits
                                per symbol are used in the interleaving matrix),
                                but still occupies 4+CR = 8 symbols on air.
                                Looks like normal data symbols in the table.
 
-  Symbols 21+                 PAYLOAD
+  Symbols 20+                 PAYLOAD
                                The actual encoded data bytes. Each row of the
                                interleaving matrix produces one chip value here.
                                For a 1-byte payload at CR=4/8 and SF=8:
@@ -462,6 +462,17 @@ def main():
           f"(circular variance: {best_variance:.4f})")
     print(f"  Aligned symbol start:  sample {start}")
     # ── 4. Walk through symbols ───────────────────────────────────────
+    # ── SFD timing compensation ─────────────────────────────────────
+    # The SX1262 SFD consists of 2 full downchirps plus a 0.25-symbol
+    # downchirp. Data symbols start 0.25 symbols after the preamble-
+    # aligned grid boundary, so we shift data extraction by N//4.
+    # Preamble(8) + sync(2) + SFD_full(2) = 12 symbols → first data = index 14
+    # (assuming 2 pre-burst symbols, so preamble starts at index 2)
+    PREAMBLE_START  = 2
+    PREAMBLE_LEN    = 8
+    SFD_END_SYM     = PREAMBLE_START + PREAMBLE_LEN + 2 + 2   # = 14
+    sfd_quarter_shift = N // 4                # 64 samples for SF=8
+
     print()
     print(f"{'Sym':>4}  {'Start':>8}  {'Peak bin':>8}  {'Peak/Mean':>10}  Notes")
     print("-" * 60)
@@ -471,7 +482,10 @@ def main():
     peak_means = []
 
     for i in range(N_SYMBOLS):
-        s0 = start + i * N
+        if i >= SFD_END_SYM:
+            s0 = start + i * N + sfd_quarter_shift
+        else:
+            s0 = start + i * N
         s1 = s0 + N
         if s1 > len(chip_sig):
             print(f"{i:4}  (end of signal)")
@@ -500,9 +514,9 @@ def main():
             note = f'← preamble upchirp (bin {peak_bin:.0f} repeating)'
         elif 10 <= i <= 11:
             note = '← sync symbol'
-        elif 12 <= i <= 14:
+        elif 12 <= i <= 13:
             note = '← downchirp (low PMR expected)'
-        elif 15 <= i <= 22:
+        elif 14 <= i <= 21:
             note = '← header'
         else:
             note = '← payload'
@@ -584,7 +598,7 @@ def main():
             note = '← preamble (should be 0)'
         elif i < best_start + best_len + 2:
             note = '← sync symbol'
-        elif i < best_start + best_len + 5:
+        elif i < best_start + best_len + 4:
             note = '← downchirp / freq-sync'
         else:
             note = ''
@@ -601,9 +615,9 @@ def main():
                 role = 'preamble'
             elif i < best_start + best_len + 2:
                 role = 'sync'
-            elif i < best_start + best_len + 5:
+            elif i < best_start + best_len + 4:
                 role = 'downchirp'
-            elif i < best_start + best_len + 5 + (4 + 4):
+            elif i < best_start + best_len + 4 + (4 + 4):
                 role = 'header'   # header always uses CR=4 → 4+4 = 8 symbols per block
             else:
                 role = 'payload'

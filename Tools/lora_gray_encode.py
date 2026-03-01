@@ -131,6 +131,24 @@ def main():
     # ── Apply gray_encode(bin) to recover each symbol value ───────────────
     # Round corrected_bin to nearest integer first (it may have sub-bin
     # precision from parabolic interpolation).
+    #
+    # REDUCED-RATE (header):
+    #   gr-lora demodulate() divides the bin index by 4 and reduces to
+    #   (SF-2) bits BEFORE Gray encoding:
+    #       bin_idx = lround(bin_idx / 4.0) % d_number_of_bins_hdr
+    #       word    = bin_idx ^ (bin_idx >> 1)               // Gray encode
+    #   where d_number_of_bins_hdr = 2^(SF-2) = n_bins / 4.
+    #
+    # NORMAL (payload):
+    #   Full SF-bit bin index is Gray-encoded directly.
+    #       word = bin_idx ^ (bin_idx >> 1)
+    #
+    # Gray coding does NOT commute with truncation:
+    #   Gray(round(bin/4) % 64) ≠ Gray(bin) % 64
+    # So the reduced-rate division MUST be applied before Gray encoding.
+
+    n_bins_hdr = n_bins >> 2   # 2^(SF-2) = 64 for SF=8
+
     print(f"{'Sym':>4}  {'Role':>10}  {'Corr bin':>8}  {'Rounded':>7}  "
           f"{'Sym val':>8}  {'Binary':>10}")
     print("-" * 65)
@@ -138,7 +156,16 @@ def main():
     for sym in data['symbols']:
         corrected = sym['corrected_bin']
         rounded   = round(corrected) % n_bins     # wrap into [0, N-1]
-        sym_val   = gray_encode(rounded)           # RX: gray_encode(bin) → symbol value
+
+        role = sym.get('role', '')
+
+        if role == 'header':
+            # Reduced-rate: divide by 4, reduce to (SF-2) bits, THEN Gray
+            reduced_bin = round(rounded / 4.0) % n_bins_hdr
+            sym_val     = gray_encode(reduced_bin)
+        else:
+            # Normal: Gray encode the full SF-bit bin directly
+            sym_val     = gray_encode(rounded)
 
         # Store results
         sym['corrected_bin_rounded'] = rounded

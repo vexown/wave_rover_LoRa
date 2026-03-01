@@ -136,14 +136,20 @@ def deinterleave_block(symbol_block: List[int],
             I[i][j] = bits[i]
 
     # ── Reverse the diagonal permutation ──────────────────────────────────
-    #    D[j][k] = I[ (k + j + 1) mod R ][ j ]
+    #    D[j][k] = I[ (k - j) mod R ][ j ]
+    #
+    #  Derivation from gr-lora's rotl-then-extract-columns approach:
+    #    deinterleaved[x] bit i = rotl(symbol[i], i, R) bit x
+    #                            = symbol[i] bit ((x - i) mod R)
+    #  Mapping: x → k (codeword index), i → j (symbol/bit index)
+    #    D[j][k] = I[ (k - j) mod R ][ j ]
     #
     #  j = bit position in the codeword   (0 .. C−1)
     #  k = codeword index                 (0 .. R−1)
     D = [[0] * R for _ in range(C)]
     for j in range(C):
         for k in range(R):
-            i_idx = (k + (j + 1)) % R
+            i_idx = (k - j) % R
             D[j][k] = I[i_idx][j]
 
     # ── Assemble codewords ────────────────────────────────────────────────

@@ -97,33 +97,66 @@ from typing import List, Tuple
 #  §1 — HAMMING(8,4) DECODER
 # ══════════════════════════════════════════════════════════════════════════════
 #
-#  Syndrome lookup table — maps 4-bit syndrome to the bit position to flip.
-#  Copied from gr-lora utilities.h hamming_decode_soft_byte().
+#  IMPORTANT: gr-lora uses liquid-dsp's fec_hamming84_decode(), NOT the
+#  deprecated hamming_decode_soft_byte() from utilities.h.  The liquid-dsp
+#  implementation uses a 256-entry lookup table (hamming84_dec_gentab[])
+#  that maps each possible 8-bit received codeword directly to the
+#  corrected 4-bit nibble.
 #
-SYNDROME_LUT = [
-    0, 0, 4, 0, 6, 0, 0, 2,
-    7, 0, 0, 3, 0, 5, 1, 0
+#  The two implementations agree for valid and single-error codewords but
+#  may diverge for multi-bit errors.  We use the LUT to match gr-lora.
+#
+#  Source: liquid-dsp/src/fec/src/fec_hamming84.c
+#
+HAMMING84_DEC_LUT = [
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x3,
+    0x0, 0x0, 0x5, 0x5, 0xe, 0xe, 0x7, 0x7,
+    0x0, 0x0, 0x9, 0x9, 0x2, 0x2, 0x7, 0x7,
+    0x4, 0x4, 0x7, 0x7, 0x7, 0x7, 0x7, 0x7,
+    0x0, 0x0, 0x9, 0x9, 0xe, 0xe, 0xb, 0xb,
+    0xe, 0xe, 0xd, 0xd, 0xe, 0xe, 0xe, 0xe,
+    0x9, 0x9, 0x9, 0x9, 0xa, 0xa, 0x9, 0x9,
+    0xc, 0xc, 0x9, 0x9, 0xe, 0xe, 0x7, 0x7,
+    0x0, 0x0, 0x5, 0x5, 0x2, 0x2, 0xb, 0xb,
+    0x5, 0x5, 0x5, 0x5, 0x6, 0x6, 0x5, 0x5,
+    0x2, 0x2, 0x1, 0x1, 0x2, 0x2, 0x2, 0x2,
+    0xc, 0xc, 0x5, 0x5, 0x2, 0x2, 0x7, 0x7,
+    0x8, 0x8, 0xb, 0xb, 0xb, 0xb, 0xb, 0xb,
+    0xc, 0xc, 0x5, 0x5, 0xe, 0xe, 0xb, 0xb,
+    0xc, 0xc, 0x9, 0x9, 0x2, 0x2, 0xb, 0xb,
+    0xc, 0xc, 0xc, 0xc, 0xc, 0xc, 0xf, 0xf,
+    0x0, 0x0, 0x3, 0x3, 0x3, 0x3, 0x3, 0x3,
+    0x4, 0x4, 0xd, 0xd, 0x6, 0x6, 0x3, 0x3,
+    0x4, 0x4, 0x1, 0x1, 0xa, 0xa, 0x3, 0x3,
+    0x4, 0x4, 0x4, 0x4, 0x4, 0x4, 0x7, 0x7,
+    0x8, 0x8, 0xd, 0xd, 0xa, 0xa, 0x3, 0x3,
+    0xd, 0xd, 0xd, 0xd, 0xe, 0xe, 0xd, 0xd,
+    0xa, 0xa, 0x9, 0x9, 0xa, 0xa, 0xa, 0xa,
+    0x4, 0x4, 0xd, 0xd, 0xa, 0xa, 0xf, 0xf,
+    0x8, 0x8, 0x1, 0x1, 0x6, 0x6, 0x3, 0x3,
+    0x6, 0x6, 0x5, 0x5, 0x6, 0x6, 0x6, 0x6,
+    0x1, 0x1, 0x1, 0x1, 0x2, 0x2, 0x1, 0x1,
+    0x4, 0x4, 0x1, 0x1, 0x6, 0x6, 0xf, 0xf,
+    0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0xb, 0xb,
+    0x8, 0x8, 0xd, 0xd, 0x6, 0x6, 0xf, 0xf,
+    0x8, 0x8, 0x1, 0x1, 0xa, 0xa, 0xf, 0xf,
+    0xc, 0xc, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf,
+]
+
+# Encoder LUT (for debug / verification):
+#   hamming84_enc_gentab[nibble] → 8-bit codeword
+HAMMING84_ENC_LUT = [
+    0x00, 0xd2, 0x55, 0x87, 0x99, 0x4b, 0xcc, 0x1e,
+    0xe1, 0x33, 0xb4, 0x66, 0x78, 0xaa, 0x2d, 0xff,
 ]
 
 
-def bit(v: int, i: int) -> int:
-    """Extract bit i from byte v."""
-    return (v >> i) & 1
-
-
-def pack_nibble(a: int, b: int, c: int, d: int) -> int:
-    """Pack 4 bits into a nibble: dcba (a = LSB)."""
-    return a | (b << 1) | (c << 2) | (d << 3)
-
-
-def hamming_decode_soft_byte(v: int) -> Tuple[int, int]:
+def hamming84_decode(v: int) -> Tuple[int, bool]:
     """
-    Decode one Hamming(8,4) codeword to a 4-bit data nibble.
+    Decode one Hamming(8,4) codeword using liquid-dsp's LUT.
 
-    Implements gr-lora's hamming_decode_soft_byte() from utilities.h:
-      1. Compute 4-bit syndrome from parity checks
-      2. If syndrome is non-zero, flip the indicated bit (single-error correction)
-      3. Extract data bits from positions {1, 2, 3, 5}
+    This matches the actual fec_decode path used by gr-lora:
+        s = hamming84_dec_gentab[v]
 
     Parameters
     ----------
@@ -131,38 +164,15 @@ def hamming_decode_soft_byte(v: int) -> Tuple[int, int]:
 
     Returns
     -------
-    (nibble, syndrome) : tuple
-        nibble   — corrected 4-bit data value (0–15)
-        syndrome — 4-bit syndrome (0 = no error detected)
+    (nibble, corrected) : tuple
+        nibble    — decoded 4-bit data value (0–15)
+        corrected — True if the codeword was not a perfect match
+                    (i.e., the re-encoded nibble differs from the input)
     """
-    # ── Received parity bits ──────────────────────────────────────────────
-    p1 = bit(v, 0)
-    p2 = bit(v, 4)
-    p3 = bit(v, 6)
-    p4 = bit(v, 7)
-
-    # ── Computed parity from data bits ────────────────────────────────────
-    p1c = bit(v, 2) ^ bit(v, 3) ^ bit(v, 5)
-    p2c = bit(v, 1) ^ bit(v, 2) ^ bit(v, 3)
-    p3c = bit(v, 1) ^ bit(v, 2) ^ bit(v, 5)
-    p4c = bit(v, 1) ^ bit(v, 3) ^ bit(v, 5)
-
-    # ── Syndrome ──────────────────────────────────────────────────────────
-    syndrome = pack_nibble(
-        int(p1 != p1c),
-        int(p2 != p2c),
-        int(p3 != p3c),
-        int(p4 != p4c)
-    )
-
-    # ── Error correction ──────────────────────────────────────────────────
-    if syndrome:
-        v ^= (1 << SYNDROME_LUT[syndrome])
-
-    # ── Extract data bits {1, 2, 3, 5} ───────────────────────────────────
-    nibble = pack_nibble(bit(v, 1), bit(v, 2), bit(v, 3), bit(v, 5))
-
-    return nibble, syndrome
+    nibble = HAMMING84_DEC_LUT[v & 0xFF]
+    # Check if error correction was applied
+    corrected = (HAMMING84_ENC_LUT[nibble] != (v & 0xFF))
+    return nibble, corrected
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -200,12 +210,12 @@ def decode_codewords_to_bytes(codewords: List[int],
     detail = []
 
     for i in range(0, len(codewords), 2):
-        d1, s1 = hamming_decode_soft_byte(codewords[i])
+        d1, c1 = hamming84_decode(codewords[i])
 
         if i + 1 < len(codewords):
-            d2, s2 = hamming_decode_soft_byte(codewords[i + 1])
+            d2, c2 = hamming84_decode(codewords[i + 1])
         else:
-            d2, s2 = 0, 0   # odd count: pad with zero nibble
+            d2, c2 = 0, False   # odd count: pad with zero nibble
 
         if is_header:
             byte_val = (d1 << 4) | d2
@@ -218,7 +228,7 @@ def decode_codewords_to_bytes(codewords: List[int],
             'codewords': [codewords[i],
                           codewords[i + 1] if i + 1 < len(codewords) else 0],
             'nibbles': [d1, d2],
-            'syndromes': [s1, s2],
+            'corrected': [c1, c2],
             'byte': byte_val,
         })
 
@@ -360,16 +370,15 @@ def main():
     print(f"  Header CRC     : {hf.get('header_crc', '?')}")
     print(f"  Reserved       : {hf.get('reserved', '?')}")
 
-    # Show per-pair syndromes
+    # Show per-pair details
     for d in header_detail:
         cws = d['codewords']
         nib = d['nibbles']
-        syn = d['syndromes']
-        flag = ' ← corrected' if any(s != 0 for s in syn) else ''
+        cor = d['corrected']
+        flag = ' ← corrected' if any(cor) else ''
         print(f"    pair {d['pair']}: "
               f"0x{cws[0]:02X},0x{cws[1]:02X} → "
-              f"nibbles {nib[0]:X},{nib[1]:X} → 0x{d['byte']:02X}"
-              f"  syn={syn}{flag}")
+              f"nibbles {nib[0]:X},{nib[1]:X} → 0x{d['byte']:02X}{flag}")
 
     print()
     print("═══════════════ PAYLOAD ══════════════")
@@ -388,12 +397,11 @@ def main():
     for d in payload_detail:
         cws = d['codewords']
         nib = d['nibbles']
-        syn = d['syndromes']
-        flag = ' ← corrected' if any(s != 0 for s in syn) else ''
+        cor = d['corrected']
+        flag = ' ← corrected' if any(cor) else ''
         print(f"    pair {d['pair']}: "
               f"0x{cws[0]:02X},0x{cws[1]:02X} → "
-              f"nibbles {nib[0]:X},{nib[1]:X} → 0x{d['byte']:02X}"
-              f"  syn={syn}{flag}")
+              f"nibbles {nib[0]:X},{nib[1]:X} → 0x{d['byte']:02X}{flag}")
 
     print()
     print(f"Wrote decoded output to: {args.output}")
