@@ -7,9 +7,9 @@
 #  Stage 2: Dechirp & extract symbol values            → lora_symbols.json
 #  Stage 3: Recover symbol values (Gray encode bins)   → lora_symbols_gray.json
 #  Stage 4: Deinterleave symbols into codewords        → lora_deinterleaved.json
-#  Stage 5: (future) HEADER: Hamming decode
-#  Stage 6: (future) PAYLOAD: dewhiten → Hamming decode
-#  Stage 7: (future) Byte assembly + CRC check
+#  Stage 5: Deshuffle codeword bits                    → lora_deshuffled.json
+#  Stage 6: Dewhiten (XOR remove PRNG whitening)       → lora_dewhitened.json
+#  Stage 7: Hamming(8,4) decode + byte assembly        → lora_decoded.json
 #
 # ── KNOWN LIMITATIONS ─────────────────────────────────────────────────────────
 #  This pipeline is currently hardcoded for:
@@ -107,13 +107,42 @@ fi
 
 echo
 
-# ── Stage 5: (placeholder) Hamming decode header, dewhiten+Hamming payload, bytes, CRC ─
+# ── Stage 5: Deshuffle codeword bits ──────────────────────────────────────────
 echo "════════════════════════════════════════════════════════════════"
-echo "  Stage 5+: Remaining decode (not yet implemented)"
+echo "  Stage 5: Deshuffling codeword bits"
 echo "════════════════════════════════════════════════════════════════"
-echo "  TODO: HEADER: Hamming decode"
-echo "        PAYLOAD: dewhiten → Hamming decode"
-echo "        Byte assembly"
-echo "        CRC check"
+python3 "${SCRIPT_DIR}/lora_deshuffle.py" lora_deinterleaved.json -o lora_deshuffled.json
+
+if [ ! -f "lora_deshuffled.json" ]; then
+    echo "ERROR: Deshuffle failed — lora_deshuffled.json not created."
+    exit 1
+fi
+
+echo
+
+# ── Stage 6: Dewhiten (remove PRNG whitening) ────────────────────────────────
+echo "════════════════════════════════════════════════════════════════"
+echo "  Stage 6: Dewhitening codewords (XOR with PRNG)"
+echo "════════════════════════════════════════════════════════════════"
+python3 "${SCRIPT_DIR}/lora_dewhiten.py" lora_deshuffled.json -o lora_dewhitened.json
+
+if [ ! -f "lora_dewhitened.json" ]; then
+    echo "ERROR: Dewhiten failed — lora_dewhitened.json not created."
+    exit 1
+fi
+
+echo
+
+# ── Stage 7: Hamming(8,4) decode + byte assembly + header parse ───────────────
+echo "════════════════════════════════════════════════════════════════"
+echo "  Stage 7: Hamming decode → nibbles → bytes → header parse"
+echo "════════════════════════════════════════════════════════════════"
+python3 "${SCRIPT_DIR}/lora_hamming_decode.py" lora_dewhitened.json -o lora_decoded.json
+
+if [ ! -f "lora_decoded.json" ]; then
+    echo "ERROR: Hamming decode failed — lora_decoded.json not created."
+    exit 1
+fi
+
 echo
 echo "Pipeline complete."
