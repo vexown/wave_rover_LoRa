@@ -25,8 +25,8 @@
 #    • Stage 4 falls back to CR=4 if the header hasn't been decoded yet.
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
-#   bash lora_decoder.sh              # full pipeline: capture + symbol extraction
-#   bash lora_decoder.sh --skip-capture   # reuse existing last_capture.npy
+#   bash lora_decoder.sh                    # full pipeline: capture + symbol extraction
+#   bash lora_decoder.sh --skip-capture     # reuse existing last_capture.npy
 #
 # ══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail

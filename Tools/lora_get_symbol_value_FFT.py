@@ -7,18 +7,16 @@ This script answers one question: "what chip value is each symbol?"
 A LoRa symbol is a chirp (a signal that sweeps from low to high frequency
 over time). Each symbol carries information by starting that sweep at a
 different frequency offset — that offset is called the "chip value" and
-is an integer from 0 to 2^SF - 1 (so 0–255 for SF=8).
+is an integer from 0 to 2^SF - 1 (so 0-255 for SF=8).
 
-IMPORTANT NOTE (CAPTURE METHOD)
-────────────────────────────────
-This script no longer records from an RTL-SDR directly.
-
-Raw IQ samples must be captured separately using external tools
+──────────────────────────────────────────────────────────────────────────────────────────
+Note - Raw IQ samples must be captured separately using external tools
 (e.g. rtl_sdr) and saved to a file (you can use capture_rtl_sdr_v4.sh to do this).
 This script then performs deterministic, repeatable analysis on that recorded data.
 
 This separation avoids SDR driver instability and allows the DSP
 analysis below to be rerun many times on the exact same capture.
+──────────────────────────────────────────────────────────────────────────────────────────
 
 This script:
   1. Loads raw IQ samples from a file
@@ -30,35 +28,35 @@ This script:
 That's it. No decoding, no preamble detection algorithm, no assumptions
 about frame structure. We just observe and describe what we see.
 
-HOW TO READ THE OUTPUT TABLE
-──────────────────────────────
+HOW TO READ THE OUTPUT TABLE (which is printed to the terminal)
+──────────────────────────────────────────────────────────────────────────────────────────
   Sym       — symbol index counting from the detected burst start (0 = first)
   Start     — sample number in the chip-rate signal where this symbol begins
   Peak bin  — the chip value: which FFT bin had the most energy after dechirping.
-              This is the "message" encoded in this symbol (0–255 for SF=8).
+              This is the "message" encoded in this symbol (0-255 for SF=8).
   Peak/Mean — signal quality ratio: peak bin energy divided by average bin energy.
               A clean single-frequency tone after dechirping concentrates all its
               energy into ONE bin, so a clean symbol has a very high ratio.
               > 20  = very clean symbol, chip value is reliable
-              5–20  = usable but some noise present
+              5-20  = usable but some noise present
               < 5   = noise only, no real signal here, chip value is meaningless
 
 WHAT TO EXPECT IN A VALID LORA FRAME (SF=8, CR=4/8)
-──────────────────────────────────────────────────────
-  Symbols 0–7   (8 symbols)   PREAMBLE
+────────────────────────────────────────────────────────────────────────────────────
+  Symbols 0-7   (8 symbols)   PREAMBLE
                                All 8 should show the SAME peak bin with PMR > 20.
                                The value is ideally bin 0 (unmodulated base chirp)
                                but may be a small consistent offset due to the
                                capture device's inherent frequency error (~few ppm).
 
-  Symbols 8–9   (2 symbols)   FRAME SYNC (sync word)
+  Symbols 8-9   (2 symbols)   FRAME SYNC (sync word)
                                Two symbols with DIFFERENT bin values from the
                                preamble and from each other. These encode the
                                network sync word nibbles, left-shifted by SF-4.
                                e.g. sync word 0x7F → hi nibble 0x7, lo nibble 0xF
                                → symbol bins: 0x7 << 4 = 112  and  0xF << 4 = 240
 
-  Symbols 10–11 (2 symbols)   FREQUENCY SYNC (downchirps)
+  Symbols 10-11 (2 symbols)   FREQUENCY SYNC (downchirps)
                                Two full downchirps (SX1262 SFD).
                                A downchirp sweeps HIGH to LOW frequency — the
                                opposite of our base upchirp. When we dechirp
@@ -68,9 +66,9 @@ WHAT TO EXPECT IN A VALID LORA FRAME (SF=8, CR=4/8)
                                Result: these symbols show LOW PMR. This is not
                                an error — it is the expected and correct behaviour.
 
-  Symbols 12–19 (8 symbols)   HEADER  (4+CR = 8 symbols, always CR=4)
+  Symbols 12-19 (8 symbols)   HEADER  (4+CR = 8 symbols, always CR=4)
                                Contains payload length, coding rate, CRC flag.
-                               Transmitted at "reduced rate" (only SF−2 = 6 bits
+                               Transmitted at "reduced rate" (only SF-2 = 6 bits
                                per symbol are used in the interleaving matrix),
                                but still occupies 4+CR = 8 symbols on air.
                                Looks like normal data symbols in the table.
@@ -79,22 +77,8 @@ WHAT TO EXPECT IN A VALID LORA FRAME (SF=8, CR=4/8)
                                The actual encoded data bytes. Each row of the
                                interleaving matrix produces one chip value here.
                                For a 1-byte payload at CR=4/8 and SF=8:
-                               2 nibbles × 1 codeword each, padded to SF=8
+                               2 nibbles x 1 codeword each, padded to SF=8
                                codewords → 8 payload symbols.
-
-RECORDING REQUIREMENTS (recommended)
-──────────────────────────────────────
-• Use rtl_sdr (or equivalent) to capture unsigned 8-bit interleaved I/Q:
-    rtl_sdr -f 869725000 -s 2400000 -g 0 -n $((2400000 * 10)) last_capture.iq
-
-  - This records at 2.4 MS/s and uses the same CENTER_FREQ, SAMPLE_RATE
-    and record length that this script expects by default.
-  - rtl_sdr produces uint8 interleaved I/Q in the order: I0, Q0, I1, Q1, ...
-  - The helper bash script `capture_rtl_sdr_v4.sh`  converts
-    the raw .iq to a numpy .npy (complex64) file which this script can load
-    directly.
-
-• Alternatively save as .npy (complex64) where each element is (I + jQ).
 
 """
 import os

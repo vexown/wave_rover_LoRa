@@ -44,22 +44,6 @@
 #       sudo apt update
 #       sudo apt install rtl-sdr librtlsdr-dev
 #
-#   Fedora / RHEL:
-#       sudo dnf install rtl-sdr rtl-sdr-devel
-#
-#   Arch Linux:
-#       sudo pacman -S rtl-sdr
-#
-#   macOS (Homebrew):
-#       brew install librtlsdr
-#
-#   Build from source (any Linux):
-#       sudo apt install git cmake build-essential libusb-1.0-0-dev  # deps
-#       git clone https://github.com/osmocom/rtl-sdr.git
-#       cd rtl-sdr && mkdir build && cd build
-#       cmake .. -DINSTALL_UDEV_RULES=ON
-#       make -j$(nproc) && sudo make install && sudo ldconfig
-#
 #   After installation, verify with:
 #       rtl_test -t          # should detect the dongle and print tuner type
 #
