@@ -35,7 +35,7 @@ typedef enum
     WEB_TERMINAL_INIT_FAILED
 } init_status_t;
 
-char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH] = "HELLOLORA"; // Default message to send
+char LoRaMessageGlobal[MAX_LORA_PAYLOAD_LENGTH] = {(char)0x54}; // Default message to send
 
 /* Mutex for protecting LoRaMessageGlobal access */
 SemaphoreHandle_t lora_message_mutex = NULL;
@@ -416,7 +416,8 @@ static init_status_t init_components(void)
         DUTY_CYCLE_LIMIT_ETSI_EN_300_220_BAND_O
     );
     sx1262_config.lora_mod_params.sf = SX126X_LORA_SF8;
-    sx1262_config.lora_mod_params.bw = SX126X_LORA_BW_062;
+    sx1262_config.lora_mod_params.bw = SX126X_LORA_BW_125;
+    sx1262_config.lora_mod_params.cr = SX126X_LORA_CR_4_8;
     
     sx126x_status_t status = sx1262_init_lora(&sx1262_config);
     if (status != SX126X_STATUS_OK)
