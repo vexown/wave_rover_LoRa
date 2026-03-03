@@ -86,8 +86,6 @@ import numpy as np
 from scipy.signal import resample_poly
 from scipy.io import wavfile
 import matplotlib.pyplot as plt
-import sys
-import time
 import argparse
 import json
 
@@ -95,14 +93,7 @@ import json
 #  CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════
 
-# By default this script runs in 'file' mode: it expects a saved .npy/.iq/.wav
-# capture produced by an external tool (e.g. rtl_sdr CLI). This avoids device-
-# specific capture issues and makes results reproducible. If you previously
-# used 'sdr' live capture, switch to using the provided capture helper and
-# leave MODE='file' here.
-MODE           = 'file'              # 'sdr' = live capture from RTL-SDR (disabled)
-                                        # 'file' = load previously saved .npy/.iq/.wav file
-IQ_FILE        = 'last_capture.npy'  # used when MODE = 'file'
+IQ_FILE        = 'last_capture.npy'  # Path to raw IQ capture file. Accepted formats: .npy, .wav, .iq/.raw (rtl_sdr format)
 
 # We intentionally tune 200 kHz ABOVE the actual LoRa frequency when capturing
 # with the RTL-SDR. Reason: the RTL-SDR hardware produces a strong "DC spike"
@@ -116,73 +107,29 @@ F_OFFSET       = -200_000           # Software correction: shift signal back dow
                                     # by 200 kHz to put it at baseband (0 Hz)
 
 SF             = 8                  # Spreading Factor
-                                    # Determines: symbol length N = 2^SF = 256 samples
-                                    # Determines: chip value range = 0 to 2^SF-1 = 255
-                                    # Determines: symbol duration = N/BW = 2.048 ms
+                                    # Determines: symbol length N = 2^SF. E.g. from SF8 N = 256 samples
+                                    # Determines: chip value range = 0 to 2^SF-1. E.g. from SF8, 0-255.
+                                    # Determines: symbol duration = N/BW. E.g. from SF8 and BW=125kHz, 256/125000 = 2.048 ms per symbol.
 
 BW             = 125_000            # LoRa channel bandwidth in Hz = chip rate
                                     # At this rate, one symbol = exactly 2^SF samples
 
-# NOTE: SAMPLE_RATE is the rate used during the original capture. Keep this
-#       in sync with how you recorded the data (e.g. with rtl_sdr -s 2400000).
 SAMPLE_RATE    = 2_400_000          # RTL-SDR sample rate in samples/sec
                                     # Downsample ratio to chip rate: 2400000/125000 = 19.2
-
-RECORD_SECONDS = 10                 # Capture duration used when creating the file
-                                    # (keeps this parameter visible for users)
-
-SDR_GAIN       = 'auto'             # Recording-time gain recommendation (kept for docs only)
-
-PPM            = 0                  # Frequency correction used during capture (docs only)
-                                    # If you measured an RTL-SDR ppm error in previous runs,
-                                    # apply the opposite sign when recording (or set here
-                                    # for documentation) so the frequency offset is known.
-                                    # Note: many RTL-SDR Blog V4 builds don't support setting
-                                    # ppm via software; prefer CLI capture or hardware that supports it.
+                                    # NOTE: SAMPLE_RATE is the rate used during the original capture. Keep this
+                                    #       in sync with how you recorded the data (e.g. with rtl_sdr -s 2400000).
 
 N_SYMBOLS      = 32                 # Symbols to analyse and print.
-                                    # Full SF=8 frame: ~2(pre) + 8(preamble) + 2(sync)
-                                    #   + 3(downchirp) + 8(header) + 8(payload) = 31 min
+                                    # Full SF=8 frame: ~2(pre-burst noise) + 8(preamble) + 2(sync) + 3(downchirp) + 8(header) + 8(payload) = 31 min
                                     #
-                                    # ⚠ HARDCODED for SF=8, CR=4, 1-byte payload.
-                                    #   For longer payloads or different SF/CR, increase
-                                    #   this value.  Ideally compute dynamically from
-                                    #   header decode results.
+                                    # NOTE: HARDCODED for SF=8, CR=4, 1-byte payload. For longer payloads or different SF/CR, increase
+                                    #       this value.  Ideally compute dynamically from header decode results.
 
 PLOT           = True               # Show matplotlib plots
 
-# ═════════════════════════════════════════════════════════════════════==
-#  CAPTURE FUNCTIONS  (live capture removed — file-based workflow)
-# ═════════════════════════════════════════════════════════════════════==
-#
-# Live SDR capture code has been intentionally removed from this script to
-# avoid device-specific crashes (e.g. synchronous read issues on RTL-SDR Blog V4).
-# Use an external CLI capture (rtl_sdr) to produce a `.iq` or convert it to
-# `.npy` using the provided helper script. This keeps the analysis script
-# focused on signal processing and makes captures repeatable and debuggable.
-# ═════════════════════════════════════════════════════════════════════==
-
-def capture_from_sdr(n_samples: int) -> np.ndarray:
-    """
-    Previously this function performed live capture from an RTL-SDR device.
-
-    NOTE: live SDR capture removed. To create input for this script:
-      1. Use `rtl_sdr` (or equivalent) from the command line to record raw
-         unsigned 8-bit interleaved I/Q samples to a file (e.g. last_capture.iq).
-         Example:
-           rtl_sdr -f 869725000 -s 2400000 -g 0 -n $((2400000 * 10)) last_capture.iq
-
-      2. Convert the raw `.iq` to numpy complex64 (the helper `capture_rtl.sh`
-         does this and writes `last_capture.npy`).
-
-      3. Run this script with MODE = 'file' and IQ_FILE pointing to the .npy file.
-
-    This function now raises to make the intended workflow explicit.
-    """
-    raise RuntimeError(
-        "Live SDR capture disabled in this script. Produce a .npy/.iq/.wav file externally and run with MODE='file'."
-    )
-
+# ═══════════════════════════════════════════════════════════════════════
+#  FILE HANDLING FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════
 
 def load_from_file(path: str) -> np.ndarray:
     # Load a saved capture from disk and convert it to complex64 IQ samples.
@@ -332,15 +279,8 @@ def main():
     N = 1 << SF   # 256 samples per symbol at chip rate for SF=8
 
     # ── 1. Acquire (file-based) ────────────────────────────────────────
-    print("Acquiring …")
-    if MODE == 'sdr':
-        # live SDR capture has been removed to avoid crashes on certain devices.
-        # Use the capture_rtl.sh script (rtl_sdr CLI) to create last_capture.npy
-        # and run this script with MODE = 'file'.
-        raise RuntimeError("Live SDR capture is disabled. Run capture_rtl.sh and set MODE='file'.")
-    else:
-        print(f"  Loading {iq_file} …")
-        raw = load_from_file(iq_file)
+    print(f"  Loading {iq_file} …")
+    raw = load_from_file(iq_file)
 
     # Quick sanity check: ensure we loaded something reasonable
     if raw is None or len(raw) == 0:
