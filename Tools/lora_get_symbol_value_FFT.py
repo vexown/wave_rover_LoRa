@@ -308,13 +308,38 @@ def main():
     baseband = raw * np.exp(-1j * 2 * np.pi * F_OFFSET * t)
 
     # Rational downsample from SAMPLE_RATE to BW.
-    # 2,400,000 / 125,000 = 19.2 = 96/5
-    # resample_poly(signal, up, down): upsamples by 'up' then downsamples
-    # by 'down', applying a proper low-pass anti-aliasing filter.
-    # After this, one LoRa symbol = exactly N = 256 samples.
-    lcm      = 5
+    # ────────────────────────────────────────────────────────────────────
+    # WHY: A LoRa symbol is a chirp that sweeps linearly across the entire
+    # bandwidth BW (from -BW/2 to +BW/2). Each symbol carries N = 2^SF samples.
+    # For the dechirping algorithm to work optimally — and to extract chip
+    # values with full frequency resolution — we need:
+    #
+    #     sample_rate = BW
+    #
+    # This ensures ONE SYMBOL = EXACTLY N SAMPLES, so the downstream FFT
+    # has perfect alignment:
+    #
+    #   • After dechirping, a symbol with chip value C becomes a pure
+    #     complex sinusoid at frequency: f_C = C * (BW / N)
+    #
+    #   • The FFT bin spacing (for N samples at rate BW) is: Δf = BW / N
+    #
+    #   • Therefore: sinusoid at f_C lands EXACTLY in FFT bin C
+    #
+    # PAYOFF: All energy concentrates in ONE bin (no spreading into neighbors),
+    # maximizing SNR and ensuring argmax(FFT) directly gives the chip value
+    # with zero ambiguity.
+    #
+    #   • KEY INSIGHT: 1-to-1 mapping: Chip value C → FFT bin C (no decimals, no spreading across bins)
+    #
+    # HOW: Compute the rational resampling ratio 2,400,000 / 125,000 = 19.2 = 96/5
+    # resample_poly(signal, up, down) upsamples by 'up' (×5) then downsamples
+    # by 'down' (÷96), applying a proper low-pass anti-aliasing filter at the
+    # intermediate rate. Net effect: divide sample rate by 19.2 with zero aliasing.
+    # Result: one LoRa symbol = exactly N = 256 samples at the chip rate.
+    lcm      = 5   # lcm = least common multiple of 5 and 96, to achieve exact rational resampling
     up       = lcm                          # ×5
-    down     = int(SAMPLE_RATE / BW * lcm) # ÷96  (net effect: ÷19.2)
+    down     = int(SAMPLE_RATE / BW * lcm)  # ÷96  (net effect: ÷19.2)
     chip_sig = resample_poly(baseband, up, down).astype(np.complex64)
     print(f"  Chip-rate samples: {len(chip_sig)}")
 
