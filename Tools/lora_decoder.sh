@@ -23,6 +23,9 @@
 #      Longer payloads or different SF/CR will need a larger N_SYMBOLS.
 #    • Stage 2 symbol role annotations use hardcoded index ranges.
 #    • Stage 4 falls back to CR=4 if the header hasn't been decoded yet.
+#  The decoder was tested only on specific hardware:
+#    • RTL-SDR v4
+#    • LoRa end-device: Heltec LoRa V3 (ESP32 + SX1262)
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
 #   bash lora_decoder.sh                    # full pipeline: capture + symbol extraction

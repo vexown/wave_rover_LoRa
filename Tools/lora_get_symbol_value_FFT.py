@@ -344,7 +344,25 @@ def main():
     print(f"  Chip-rate samples: {len(chip_sig)}")
 
     # ── 3. Find exact symbol boundary ─────────────────────────────────
-    # Step 1: compute mean power per N-sample block to locate the burst
+    # CHALLENGE: LoRa symbol boundaries don't align to arbitrary N-sample
+    # block boundaries. When we captured this signal, the true symbols started
+    # at some unknown fractional offset within our block grid. We need to find
+    # that offset(0 to N-1 samples) to align our slicing correctly for
+    # dechirping. Misalignment → chirp doesn't cancel cleanly → corrupted bins.
+    #
+    # STRATEGY: The preamble (first 8 unmodulated chirps) ALL encode chip
+    # value 0 by definition. If we're aligned correctly, all preamble symbols
+    # will dechirp to FFT bin values very close to 0 (or offset consistently
+    # due to capture device frequency error, but still CONSISTENT across all 8).
+    # If we're misaligned, the preamble bins will scatter randomly across 0-N.
+    # We try all 256 possible offsets and pick the one where preamble bins
+    # are most tightly clustered.
+    #
+
+    # STEP 1: Coarse burst detection via energy
+    # ──────────────────────────────────────────────────────────────────────
+    # Divide the signal into N-sample blocks and compute mean power in each.
+    # This gives us a rough "loudness map": where is the LoRa transmission?
     energies = np.array([
         np.mean(np.abs(chip_sig[i : i + N]) ** 2)
         for i in range(0, len(chip_sig) - N, N)
@@ -358,7 +376,13 @@ def main():
     print(f"Noise floor (median): {np.median(energies):.4f}")
     print(f"Peak energy:          {np.max(energies):.4f}")
 
-    # Step 2: walk back from peak to find burst rising edge
+    # STEP 2: Find burst edge by walking back from peak
+    # ──────────────────────────────────────────────────────────────────────
+    # Starting at the loudest symbol, walk backward until energy drops below
+    # 10x the noise floor. This marks the rising edge of the burst (where the
+    # preamble begins). We stop walking when we hit a symbol that's "quiet enough"
+    # to be pre-burst noise. This gives us a "rough start" aligned to N-sample
+    # block boundaries.
     noise_floor     = np.median(energies)
     burst_peak      = np.argmax(energies)
     burst_thresh    = noise_floor * 10
@@ -372,12 +396,28 @@ def main():
     rough_start = burst_start_sym * N
     print(f"  Rough burst start: sample {rough_start}")
 
-    # Step 3: scan sample-by-sample to find exact symbol boundary.
-    # The LoRa symbol boundaries are offset from our N-sample block
-    # boundaries by some unknown amount (0 to N-1 samples). We find
-    # the exact offset by trying every possible shift and picking the
-    # one where the preamble bins are most consistent (lowest circular
-    # variance across symbols 2-9).
+    # STEP 3: Fine-tune alignment by testing all sample offsets
+    # ──────────────────────────────────────────────────────────────────────
+    # The "rough start" is aligned to N-sample block boundaries, but the true
+    # symbol start is unknown. We try every offset (offset = 0 to N-1) and for
+    # each one, we dechirp symbols 2-9 (the preamble).
+    #
+    # For each offset, we compute the "circular variance" of the preamble bin
+    # values. The key insight: unmodulated preambles should all be the same bin
+    # (or very close), so circular variance should be LOW for correct alignment
+    # and HIGH for misalignment.
+    #
+    # Why circular variance instead of regular variance?
+    # Bins wrap around at N. If preamble bins are [255, 254, 0, 1, 2], regular
+    # arithmetic mean ≈ 102.4 — nonsense! Circular mean: convert to angles on
+    # a unit circle (bin b → angle 2π*b/N), average the angles, convert back.
+    # Result: mean angle ≈ 0° → bin 0, which is correct.
+    #
+    # Circular variance (0 = perfect, 1 = random) is computed as:
+    #   r = |mean(exp(j*angle))|  (resultant vector length)
+    #   variance = 1 - r
+    # If all angles point the same direction → r ≈ 1 → variance ≈ 0
+    # If all angles are random → r ≈ 0 → variance ≈ 1
     print("  Scanning for symbol boundary alignment …")
     base_up       = make_base_upchirp(SF, BW)
     best_offset   = 0
@@ -386,7 +426,7 @@ def main():
     for offset in range(N):
         trial_start = rough_start + offset
         bins = []
-        for sym in range(2, 10):
+        for sym in range(2, 10):  # symbols 2-9 = preamble of length 8
             s0 = trial_start + sym * N
             if s0 + N > len(chip_sig):
                 break
@@ -396,10 +436,11 @@ def main():
         if len(bins) < 6:
             continue
 
+        # Compute circular mean and variance of bin angles
         angles   = [2 * np.pi * b / N for b in bins]
         mean_sin = np.mean([np.sin(a) for a in angles])
         mean_cos = np.mean([np.cos(a) for a in angles])
-        r        = np.sqrt(mean_sin**2 + mean_cos**2)
+        r        = np.sqrt(mean_sin**2 + mean_cos**2)  # resultant vector length
         circ_var = 1 - r   # 0 = perfectly consistent, 1 = random
 
         if circ_var < best_variance:
@@ -410,54 +451,88 @@ def main():
     print(f"  Best alignment offset: {best_offset} samples  "
           f"(circular variance: {best_variance:.4f})")
     print(f"  Aligned symbol start:  sample {start}")
+
+
     # ── 4. Walk through symbols ───────────────────────────────────────
-    # ── SFD timing compensation ─────────────────────────────────────
-    # The SX1262 SFD consists of 2 full downchirps plus a 0.25-symbol
-    # downchirp. Data symbols start 0.25 symbols after the preamble-
-    # aligned grid boundary, so we shift data extraction by N//4.
-    # Preamble(8) + sync(2) + SFD_full(2) = 12 symbols → first data = index 14
-    # (assuming 2 pre-burst symbols, so preamble starts at index 2)
-    PREAMBLE_START  = 2
-    PREAMBLE_LEN    = 8
-    SFD_END_SYM     = PREAMBLE_START + PREAMBLE_LEN + 2 + 2   # = 14
-    sfd_quarter_shift = N // 4                # 64 samples for SF=8
+    # OVERVIEW: Iterate through the transmission one symbol at a time.
+    # For each symbol, dechirp and extract the peak FFT bin (chip value) and
+    # the Peak/Mean ratio (signal quality metric). Collect all this data for
+    # frequency calibration in section 4b.
+    #
+    # TIMING COMPENSATION FOR SFD (Start of Frame Delimiter):
+    # The LoRa frame structure is:
+    #   Preamble (8 symbols) → Sync/Frame sync (2 symbols) → SFD (2 downchirps)
+    #   → Data/Header/Payload
+    #
+    # The SFD downchirps have special timing: the receiver aligns symbol
+    # boundaries based on the SFD phase offset. The consequence: data symbols
+    # that come AFTER the SFD are shifted by 0.25 symbol (N//4 samples) relative
+    # to the preamble-aligned grid. This is a known characteristic of the LoRa
+    # modulation and receiver behavior.
+    #
+    # Implementation: After symbol 14 (= 2 preamble + 2 sync + 2 SFD downchirps,
+    # with 2 pre-burst symbols before preamble starts), we add N//4 to the window
+    # start position to account for this phase shift in data extraction.
+    #
+    # HARDCODED FRAME STRUCTURE: This assumes SF=8, CR=4, preamble length 8,
+    # and 2 pre-burst noise symbols. Different configurations will shift these
+    # boundaries. This should be computed from detected preamble position and
+    # header decode (TODO).
+    PREAMBLE_START  = 2          # Preamble starts at symbol 2 (after 2 pre-burst symbols)
+    PREAMBLE_LEN    = 8          # Preamble is 8 unmodulated chirps
+    SFD_END_SYM     = PREAMBLE_START + PREAMBLE_LEN + 2 + 2   # = 14 (after 2 sync + 2 SFD downchirps)
+    sfd_quarter_shift = N // 4   # Apply N//4 sample shift to data symbols after SFD
 
     print()
     print(f"{'Sym':>4}  {'Start':>8}  {'Peak bin':>8}  {'Peak/Mean':>10}  Notes")
     print("-" * 60)
 
-    spectra    = []
-    chip_values = []   # raw chip values saved for calibration step below
-    peak_means = []
+    spectra    = []              # FFT spectrum for each symbol (saved for the waterfall plot)
+    chip_values = []             # Peak bin of each symbol (raw, before frequency calibration)
+    peak_means = []              # Peak/Mean ratio for each symbol (signal quality metric)
 
     for i in range(N_SYMBOLS):
+        # Determine window start position, accounting for SFD timing shift
         if i >= SFD_END_SYM:
-            s0 = start + i * N + sfd_quarter_shift
+            s0 = start + i * N + sfd_quarter_shift  # Data symbols: apply N//4 shift
         else:
-            s0 = start + i * N
+            s0 = start + i * N                       # Preamble/Sync/SFD: no shift
         s1 = s0 + N
         if s1 > len(chip_sig):
             print(f"{i:4}  (end of signal)")
             break
 
-        spectrum  = dechirp(chip_sig[s0:s1], base_up)
-        peak_bin  = get_peak_bin(spectrum)
-        # Peak/Mean ratio: how concentrated is the energy in one bin?
-        # Pure tone → all energy in one bin → PMR = N = 256 (theoretical max)
-        # Pure noise → energy spread evenly → PMR ≈ 1.0
-        # Real signals: PMR 20-50 for clean chirps, <5 for noise
+        # Dechirp this symbol window and extract chip value
+        spectrum  = dechirp(chip_sig[s0:s1], base_up)     # FFT after dechirping
+        peak_bin  = get_peak_bin(spectrum)                 # Find peak with sub-bin resolution
+        
+        # Peak/Mean ratio (PMR): Signal quality metric
+        # ────────────────────────────────────────────────────────────────────
+        # WHY: After dechirping a clean LoRa symbol (upchirp), all signal energy
+        # should concentrate in ONE FFT bin (the chip value). Noise spreads evenly
+        # across all bins. PMR measures how "peaky" the spectrum is.
+        #
+        # INTERPRETATION:
+        #   PMR = peak bin value / mean bin value
+        #   Pure sinusoid (clean symbol): peak/mean = N = 256 (all energy in 1 of 256 bins)
+        #   Pure white noise: peak/mean ≈ 1 (equal energy in all bins)
+        #   Real signals: PMR 20-50 for high-quality symbols, 5-20 for degraded,
+        #                 < 5 suggests noise or misalignment (no real signal)
+        #
+        # Use case: PMR filters for the preamble search in 4b. High PMR symbols
+        # are more reliable for calibration because the chip value is less corrupted
+        # by noise.
         peak_mean = float(np.max(spectrum) / (np.mean(spectrum) + 1e-12))
-        spectra.append(spectrum)
-        chip_values.append(peak_bin)
-        peak_means.append(peak_mean)
+        
+        spectra.append(spectrum)      # Save for waterfall plot
+        chip_values.append(peak_bin)  # Save for frequency calibration
+        peak_means.append(peak_mean)  # Save for preamble detection quality filtering
 
         # Heuristic annotations based on symbol index and PMR
-        # ⚠ These index ranges are HARDCODED for SF=8, CR=4, 1-byte payload.
+        # These index ranges are HARDCODED for SF=8, CR=4, 1-byte payload.
         #   A different SF/CR/payload length will shift the boundaries.
         #   TODO: compute from detected preamble position + header decode.
-        if   peak_mean < 5.0:
-            note = '← noise / no signal'
-        elif i <= 1:
+        if i <= 1:
             note = '← possible pre-burst noise'
         elif 2 <= i <= 9 and peak_mean > 10:
             note = f'← preamble upchirp (bin {peak_bin:.0f} repeating)'
@@ -467,46 +542,70 @@ def main():
             note = '← downchirp (low PMR expected)'
         elif 14 <= i <= 21:
             note = '← header'
+        elif peak_mean < 5.0:
+            note = '← noise / no signal'
         else:
             note = '← payload'
 
         print(f"{i:4}  {s0:8}  {peak_bin:8.1f}  {peak_mean:10.1f}  {note}")
 
     # ── 4b. Frequency calibration from preamble ───────────────────────
-    # The preamble is 8 unmodulated base chirps — they all carry chip
-    # value 0 by definition. Any consistent offset from bin 0 is the
-    # capture device's frequency error (oscillator drift + temperature).
+    # GOAL: Measure and correct the capture device's frequency error so that
+    # chip values are on their true intended positions.
     #
-    # We measure this offset by averaging the preamble bin values,
-    # then subtract it from all chip values to correct for it.
+    # PHYSICS:
+    # The preamble consists of 8 UNMODULATED base upchirps (chip value = 0).
+    # In a perfect capture device (no frequency error), all preamble symbols
+    # would dechirp to FFT bin 0. But real devices have frequency error — an
+    # oscillator offset (thermal drift, aging, manufacturing tolerance) that
+    # shifts ALL signal frequencies by a constant amount.
     #
-    # WHY CIRCULAR MEAN:
-    # Bins wrap around at N. If the offset is near 0 (e.g. bins 253,
-    # 254, 255, 0, 1, 2), a naive arithmetic mean gives ~128 — totally
-    # wrong. Circular mean converts bins to angles on a unit circle,
-    # averages the angles, then converts back. This handles wraparound
-    # correctly. For example bins [253,254,255,0,1,2] → mean angle ≈ 0°
-    # → offset bin 0, which is correct.
+    # MEASUREMENT:
+    # If all preamble bins appear at offset δ instead of 0, that offset δ
+    # (in bins) corresponds to a frequency error of δ × (BW / N) Hz.
+    # We measure δ using circular mean (to handle wraparound at N), then
+    # subtract δ from all observed chip values to recover the true encoded values.
     #
-    # PREAMBLE_START: adjust this to match where your table shows the
-    # first clean high-PMR repeating symbol. Typically symbol 2 or 3
-    # based on the burst detection landing slightly early.
+    # STRATEGY: Find the preamble run (longest consecutive sequence of symbols
+    # with high signal quality and consistent bin value), then compute the
+    # circular mean offset of those bins.
     print(f"\nFrequency calibration (from preamble):")
 
-    # Find the preamble: longest run of symbols with high PMR and consistent bin
-    min_pmr = 20.0
-    max_var = 1.0
+    # Step 1: Dynamically locate the preamble in the observation list
+    # ────────────────────────────────────────────────────────────────────────
+    # Why search instead of just using symbols 2-9 (hardcoded preamble position)?
+    # The rough symbol alignment (Step 3 earlier) may have found boundaries
+    # slightly off from the true transmitted boundaries. We search the captured
+    # data for the longest run of symbols that look like unmodulated chirps:
+    #   • HIGH PMR (≥20): Indicates strong, clean signal (not noise)
+    #   • LOW BIN VARIANCE: All symbols have the same (or very similar) bin values,
+    #     meaning they all encode the same chip value (which must be 0 for preamble)
+    #
+    # We search for runs of length 4-11 symbols within the first N_SYMBOLS of
+    # the detected transmission. The longest such run is most likely the true
+    # preamble (8 symbols, but we allow 4-11 to be robust to partial detections).
+    min_pmr = 20.0           # Threshold for "high quality" signal
+    max_var = 1.0            # Maximum allowed variance of bin values in a run
     best_start = 0
     best_len = 0
     best_var = np.inf
-    for i in range(N_SYMBOLS - 4):  # at least 4 symbols
-        for l in range(4, min(12, N_SYMBOLS - i)):
+    for i in range(N_SYMBOLS - 4):  # Search starting positions
+        for l in range(4, min(12, N_SYMBOLS - i)):  # Search run lengths (4-11 symbols)
             run_bins = chip_values[i:i + l]
             run_pmrs = peak_means[i:i + l]
+            
+            # Filter 1: All symbols in run must have PMR ≥ 20
             if np.min(run_pmrs) < min_pmr:
-                continue
+                continue  # Any symbol with low PMR ruins the run quality
+            
+            # Filter 2: Bin values must be tightly clustered (low variance)
+            # Note: uses regular variance, not circular variance. This assumes
+            # frequency error is small enough that bins don't wrap the 0-N boundary.
+            # For typical frequency errors (few ppm), this is safe. However, if
+            # error is large (rare case), regular variance could miss wraparound.
             run_var = np.var(run_bins)
             if run_var < max_var and l > best_len:
+                # Keep the longest run with low variance
                 best_len = l
                 best_start = i
                 best_var = run_var
@@ -518,12 +617,33 @@ def main():
     print(f"  Detected preamble at symbols {best_start} – {best_start + best_len - 1} (variance {best_var:.4f})")
     preamble_bins = chip_values[best_start:best_start + best_len]
 
-    # Circular mean of preamble bins
+    # Step 2: Compute circular mean of preamble bin values
+    # ────────────────────────────────────────────────────────────────────────
+    # The preamble bins should all be equal (chip value 0), but due to frequency
+    # error, they're offset by some amount δ. We compute δ using circular mean
+    # (same technique as in Step 3 earlier) to handle wraparound at bin N.
+    #
+    # MATH:
+    #   • Convert each bin to an angle: θ_b = 2π * b / N  (maps 0 to 2π)
+    #   • Average the sine and cosine of angles
+    #   • Recover mean angle: φ = atan2(mean_sin, mean_cos)
+    #   • Convert back to bin: δ_bins = φ * N / (2π) mod N
+    #
+    # RESULT: δ_bins is the frequency offset in units of FFT bins.
     angles   = [2 * np.pi * b / N for b in preamble_bins]
     mean_sin = np.mean(np.sin(angles))
     mean_cos = np.mean(np.cos(angles))
     freq_offset_bins = (np.arctan2(mean_sin, mean_cos) * N / (2 * np.pi)) % N
 
+    # Step 3: Convert bins → Hz → ppm (for user readability)
+    # ────────────────────────────────────────────────────────────────────────
+    # Each FFT bin represents a frequency span of BW/N Hz, so:
+    #   frequency error [Hz] = offset [bins] × (BW [Hz] / N)
+    # Example: offset = 2 bins, BW = 125 kHz, N = 256
+    #   freq_error = 2 × (125000 / 256) ≈ 976 Hz
+    #
+    # PPM (parts per million) is the relative frequency error:
+    #   error [ppm] = error [Hz] / center frequency [Hz] × 1e6
     freq_offset_hz  = freq_offset_bins * BW / N
     freq_offset_ppm = freq_offset_hz / CENTER_FREQ * 1e6
 
@@ -532,9 +652,20 @@ def main():
     print(f"  Offset in Hz         : {freq_offset_hz:.1f} Hz")
     print(f"  Capture device ppm error    : {freq_offset_ppm:.2f} ppm")
 
-    # Apply correction: subtract offset from every chip value, wrap at N.
-    # After correction, preamble bins should all read 0, and all other
-    # chip values are shifted to their true positions.
+    # Step 4: Apply correction to all chip values
+    # ────────────────────────────────────────────────────────────────────────
+    # Each observed chip value is shifted by offset_bins due to frequency error.
+    # Subtract the offset from all observations, wrapping at N.
+    #
+    # WHY IT WORKS:
+    # If true chip value C was transmitted, but we observe (C + offset) mod N,
+    # then subtracting offset recovers C (mod N). The modulo operation ensures
+    # wraparound: if we observe C=250 and offset=10, true value is (250-10) mod 256 = 240.
+    # If we observe C=5 and offset=10, true value is (5-10) mod 256 = 251 (wraps).
+    #
+    # EXPECTATION AFTER CORRECTION:
+    # • Preamble symbols: should read ~0 (unmodulated base chirps)
+    # • Data/Payload symbols: should read their true intended chip values
     corrected = [(c - freq_offset_bins) % N for c in chip_values]
 
     print(f"\nCorrected chip values (offset subtracted):")
