@@ -11,11 +11,17 @@ We use Gray coding so that adjacent symbols differ by only 1 bit, which reduces
 bit errors (KEY IDEA) when the receiver slightly misidentifies the symbol
 (compared to a binary mapping where adjacent symbols could differ by many bits).
 
-Example of an error where the receiver detects the wrong symbol by 1 position:
-    Without Gray code (binary mapping):
-    011 → 100   (3 bit errors)
-    With Gray code:
-    011 → 010   (1 bit error)
+Example — symbol 3 misread as 4 (one-position error):
+
+Without Gray mapping (use raw binary labels):
+  3 (DEC) = 011 (BIN)
+  4 (DEC) = 100 (BIN)
+  011 → 100  (3 bit differences)  ← bad: many bit errors
+
+With Gray mapping (TX maps values via gray_to_binary; RX applies binary_to_gray):
+  Gray(3) = 3 ^ (3>>1) = 011 ^ 001 = 010
+  Gray(4) = 4 ^ (4>>1) = 100 ^ 010 = 110
+  010 → 110  (1 bit difference)  <- good: nearest-neighbor error → 1 bit error only
 
 LoRa Gray coding (Robyns et al. 2018, §2.1, Eq. 2)
 ────────────────────────────────────────────────────
@@ -145,23 +151,93 @@ def main():
     print()
 
     # ── Apply binary_to_gray(bin) to recover each symbol value ────────────
-    # Round corrected_bin to nearest integer first (it may have sub-bin
+    # Round corrected_bin to the nearest integer first (it may have sub-bin
     # precision from parabolic interpolation).
     #
-    # REDUCED-RATE (header):
-    #   gr-lora demodulate() divides the bin index by 4 and reduces to
-    #   (SF-2) bits BEFORE Gray mapping:
+    # REDUCED-RATE (header / LDRO):
+    #   In reduced-rate mode the transmitter only uses every 4th FFT bin,
+    #   reducing the number of valid symbol positions from 2^SF to 2^(SF-2).
+    #   This effectively spreads valid symbol bins farther apart in frequency,
+    #   increasing tolerance to frequency drift and noise.
+    #
+    #   gr-lora demodulate() performs the following operation:
+    #
     #       bin_idx = lround(bin_idx / 4.0) % d_number_of_bins_hdr
-    #       word    = bin_idx ^ (bin_idx >> 1)               // binary_to_gray!
-    #   where d_number_of_bins_hdr = 2^(SF-2) = n_bins / 4.
+    #       word    = bin_idx ^ (bin_idx >> 1)        // binary_to_gray
+    #
+    #   where:
+    #       d_number_of_bins_hdr = 2^(SF-2) = n_bins / 4
     #
     # NORMAL (payload):
-    #   Full SF-bit bin index is mapped directly.
+    #   In normal mode the full SF-bit bin index is used directly:
+    #
     #       word = bin_idx ^ (bin_idx >> 1)
     #
-    # Gray mapping does NOT commute with truncation:
-    #   Gray(round(bin/4) % 64) ≠ Gray(bin) % 64
-    # So the reduced-rate division MUST be applied before Gray mapping.
+    #
+    # WHAT IS REDUCED-RATE (LDRO) AND WHY DOES IT MATTER?
+    #
+    #   Low Data Rate Optimization (LDRO), sometimes called "reduced rate",
+    #   is a LoRa physical-layer technique that increases robustness for
+    #   long symbol durations (high spreading factors).
+    #
+    #   Instead of using all FFT bins, the transmitter restricts valid
+    #   symbols to every fourth bin:
+    #
+    #       valid bins = {0, 4, 8, 12, ...}
+    #
+    #   This creates large spacing between valid bins, which allows the
+    #   receiver to tolerate roughly ±1–2 bins of frequency error without
+    #   confusing neighboring symbols.
+    #
+    #   After dividing the bin index by 4, the symbol effectively contains
+    #   only (SF-2) bits instead of SF bits.
+    #
+    #   The header is always transmitted using this reduced-rate mode,
+    #   while payload LDRO is typically enabled only for very low data
+    #   rate configurations (e.g., high spreading factors such as SF11–SF12).
+    #
+    #
+    # WHY ORDER MATTERS (Gray mapping does NOT commute with truncation):
+    #
+    #   Gray(round(bin/4) % 64) != round(Gray(bin)/4) % 64
+    #
+    #   The reduced-rate division MUST occur before Gray mapping.
+    #
+    #   Reason:
+    #   Gray mapping uses XOR between adjacent bits, which mixes information
+    #   from the least-significant bits into higher bits. If RF noise causes
+    #   a small bin offset, applying Gray mapping first can propagate that
+    #   noise into the decoded symbol.
+    #
+    # Example
+    #   The header uses only every 4th FFT bin for noise immunity.
+    #   Suppose TX wants to send symbol value 1.
+    #
+    #       TX physical bin = 4
+    #
+    #   Due to RF noise the receiver detects bin = 5.
+    #
+    #   WRONG WAY (Gray mapping first):
+    #
+    #       binary_to_gray(5) = 7
+    #       7 / 4 = 1.75 → round → 2
+    #
+    #       Result: symbol corrupted
+    #
+    #   CORRECT WAY (divide/truncate first):
+    #
+    #       5 / 4 = 1.25 → round → 1
+    #       binary_to_gray(1) = 1
+    #
+    #       Result: original symbol recovered
+    #
+    #   Therefore the receiver must:
+    #       1. reduce the detected bin index (divide by 4)
+    #       2. round to the nearest reduced-rate bin
+    #       3. apply Gray mapping
+    #
+    #   This prevents small RF bin jitter from being amplified by the
+    #   Gray XOR operation and ensures robust symbol recovery.
 
     n_bins_hdr = n_bins >> 2   # 2^(SF-2) = 64 for SF=8
 
