@@ -50,6 +50,53 @@ Header vs. Payload:
 
 Input  : JSON from the Gray-encode stage (symbols with 'symbol_value' & 'role')
 Output : JSON with 'codewords' (bit-lists) for header and payload blocks
+
+MOCK EXAMPLE: LoRa Deinterleaving (Pen-and-Paper Logic)
+------------------------------------------------------
+Parameters:
+    SF = 4 (4 rows, 4 bits per symbol)
+    CR = 1 (4/5 rate -> 5 symbols per block, 5 bits per codeword)
+
+Input Symbols (Gray decoded): [3, 10, 5, 12, 7]
+
+STEP 1: The Received Matrix (I)
+Convert symbols to binary (LSB first) and stack as columns.
+
+        j=0   j=1   j=2   j=3   j=4   (Symbol Index)
+        ---   ---   ---   ---   ---
+  i=0 |  1     0     1     0     1    <-- LSBs
+  i=1 |  1     1     0     0     1
+  i=2 |  0     0     1     1     1
+  i=3 |  0     1     0     1     0    <-- MSBs
+ (Row)
+
+STEP 2: The Deinterleave Formula
+Formula: i = (k - j) mod SF
+'Cheat Code': To build Codeword 'k', start at Row 'k', Column 0. 
+              Move RIGHT (j++) and UP (i--). Wrap Row 0 to Row 3.
+              This is VERY useful when tracing the diagonals by hand
+              or visualizing the matrix. 
+              Just find the starting point and follow the diagonal!
+
+STEP 3: Trace the Codewords (CW)
+The diagonals reveal the four 5-bit codewords.
+You know k (codeword index 0 to 3) and j (column index, which you iterate from 0 to 4 for each codeword), 
+so you can calculate i for each bit position in the codeword and then find it in the matrix I.
+
+CW 0 (k=0): (i=0, j=0) -> (i=3, j=1) -> (i=2, j=2) -> (i=1, j=3) -> (i=0, j=4)
+            [    1,           1,            1,             0,           1    ] => Dec: 23
+
+CW 1 (k=1): (1,0) -> (0,1) -> (3,2) -> (2,3) -> (1,4)
+            [ 1,     0,     0,     1,     1 ] => Dec: 25
+
+CW 2 (k=2): (2,0) -> (1,1) -> (0,2) -> (3,3) -> (2,4)
+            [ 0,     1,     1,     1,     1 ] => Dec: 30
+
+CW 3 (k=3): (3,0) -> (2,1) -> (1,2) -> (0,3) -> (3,4)
+            [ 0,     0,     0,     0,     0 ] => Dec: 0
+
+RESULT:
+The four 5-bit codewords [23, 25, 30, 0] are now ready for the next decoding stage
 """
 
 import json
