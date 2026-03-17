@@ -5,25 +5,111 @@ lora_dewhiten.py — LoRa Codeword Dewhitening (RX Stage 6)
 
 Removes the whitening (PRNG XOR mask) applied by the LoRa transmitter.
 
+═══════════════════════════════════════════════════════════════════════════════
+  WHAT IS WHITENING AND WHY DOES LoRa USE IT?
+═══════════════════════════════════════════════════════════════════════════════
+
+"Whitening" is a technique used in many digital communication systems
+(Bluetooth, Wi-Fi, LoRa, etc.) to make the transmitted data look random,
+even when the actual data has long runs of 0s or 1s.
+
+Why bother?
+  1. DC Balance — Long stretches of identical bits can shift the average
+     signal level away from zero, causing "DC bias." Receivers often use
+     AC-coupled front ends that reject DC, so a biased signal loses energy.
+     Whitening breaks up those runs, keeping the signal balanced.
+
+  2. Clock Recovery — The receiver's timing loop (clock recovery) needs
+     frequent 0→1 and 1→0 transitions to stay synchronized. A long stream
+     of all-zeros would starve it of transitions, causing the receiver to
+     lose symbol timing. Whitened data guarantees regular transitions.
+
+  3. Spectral Flatness — Repeating bit patterns create spectral lines
+     (energy peaks at specific frequencies), which can interfere with
+     other channels. Random-looking data spreads energy evenly across
+     the bandwidth — a "white" spectrum, hence the name "whitening."
+
+How it works:
+  The TX generates a pseudo-random sequence (PRNG) and XORs it with the
+  data before transmission. The RX generates the exact same PRNG sequence
+  and XORs again to recover the original data:
+
+      TX:  whitened[i]   = data[i]      ^ prng[i]
+      RX:  data[i]       = whitened[i]  ^ prng[i]       ← this script!
+
+  This works because XOR is its own inverse:  A ^ B ^ B = A
+
+═══════════════════════════════════════════════════════════════════════════════
+  LoRa's WHITENING IMPLEMENTATION (Semtech / gr-lora)
+═══════════════════════════════════════════════════════════════════════════════
+
+Semtech's LoRa modems use a fixed PRNG sequence (not a live LFSR that runs
+in hardware). The sequence is baked into the silicon and depends only on
+the coding rate. gr-lora reverse-engineered these sequences and stored
+them as lookup tables in lib/tables.h.
+
+There are three tables:
+
+  ┌──────────────────────┬──────────────────────────────────────────────┐
+  │ Table                │ When used                                    │
+  ├──────────────────────┼──────────────────────────────────────────────┤
+  │ prng_header[]        │ Header codewords — ALL ZEROS (whitening is   │
+  │                      │ a no-op for the header!)                     │
+  ├──────────────────────┼──────────────────────────────────────────────┤
+  │ prng_payload_cr78[]  │ Payload when CR = 3 or 4 (Hamming 7,4 /      │
+  │                      │ 8,4 — our CR=4 case)                         │
+  ├──────────────────────┼──────────────────────────────────────────────┤
+  │ prng_payload_cr56[]  │ Payload when CR = 1 or 2 (Hamming 5,4 /      │
+  │                      │ 6,4)                                         │
+  └──────────────────────┴──────────────────────────────────────────────┘
+
+Why is the header NOT whitened?
+  The header uses a fixed, well-known structure (length + CR + CRC flag +
+  header CRC). The receiver MUST decode the header before it knows any
+  payload parameters. By skipping whitening on the header, Semtech avoided
+  a chicken-and-egg problem: the receiver doesn't need to know the CR or
+  payload length to decode the header.
+
 gr-lora reference (decoder_impl.cc, dewhiten(), ~line 639):
 ─────────────────────────────────────────────────────────────
-Each codeword byte is XORed with the corresponding byte from a pre-computed
-PRNG table:
 
-    dewhitened[i] = deshuffled[i] ^ prng[i]
+    for (i = 0; i < len; i++)
+        d_words_dewhitened.push_back(d_words_deshuffled[i] ^ prng[i]);
 
-The PRNG differs for header vs. payload:
-  • Header  : prng_header[]       — ALL ZEROS  (whitening is a no-op!)
-  • Payload : prng_payload_cr78[] — for CR 3–4  (our CR=4 case)
-              prng_payload_cr56[] — for CR 1–2
-
-Tables copied verbatim from gr-lora/lib/tables.h.
+    dewhiten(is_header ? prng_header :
+        (d_phdr.cr <= 2) ? prng_payload_cr56 : prng_payload_cr78);
 
 PRNG indexing:
-  The PRNG index resets to 0 for each decode() call.  Since gr-lora
+  The PRNG index resets to 0 for each decode() call. Since gr-lora
   prepends the 6th header codeword to the payload stream (see Stage 5
   deshuffle notes), prng_payload[0] is XORed with that spillover codeword
   and prng_payload[1] with the first actual payload codeword.
+
+═══════════════════════════════════════════════════════════════════════════════
+  MOCK EXAMPLE: Dewhitening (Pen-and-Paper)
+═══════════════════════════════════════════════════════════════════════════════
+
+Suppose we have 3 payload codewords after deshuffling, and CR=4:
+
+  Deshuffled codewords:  [0xA3,  0x7F,  0x10]
+  PRNG (CR78, first 3):  [0xFF,  0xFF,  0x2D]    ← from the table below
+
+  Dewhiten:
+    codeword[0]: 0xA3 ^ 0xFF = 0x5C
+       (1010_0011 ^ 1111_1111 = 0101_1100)   ← all bits flipped!
+
+    codeword[1]: 0x7F ^ 0xFF = 0x80
+       (0111_1111 ^ 1111_1111 = 1000_0000)   ← all bits flipped!
+
+    codeword[2]: 0x10 ^ 0x2D = 0x3D
+       (0001_0000 ^ 0010_1101 = 0011_1101)
+
+  Result: [0x5C, 0x80, 0x3D]
+
+For the header, prng_header = [0x00, 0x00, ...], so:
+    codeword ^ 0x00 = codeword   (no change — XOR with zero is identity)
+
+═══════════════════════════════════════════════════════════════════════════════
 
 Pipeline position:
   … → Deinterleave → Deshuffle → **[Dewhiten]** → Hamming decode
@@ -38,15 +124,34 @@ from typing import List
 # ══════════════════════════════════════════════════════════════════════════════
 #  PRNG WHITENING TABLES — from gr-lora/lib/tables.h
 # ══════════════════════════════════════════════════════════════════════════════
+#
+#  These tables were reverse-engineered by the gr-lora project by observing
+#  the LoRa modem's behavior. They are NOT generated at runtime; they are
+#  fixed sequences hardcoded in Semtech's silicon.
+#
+#  Each byte in the PRNG table corresponds to one codeword position.
+#  The XOR happens AFTER deshuffling, BEFORE Hamming decoding.
+#
+#  Table lengths (512+ bytes each for CR78/CR56) are long enough to cover
+#  the maximum LoRa payload size (255 bytes × 2 codewords/byte = 510 codewords).
+#
 
 # Header whitening: all zeros → dewhitening is a no-op for the header.
+# Semtech chose not to whiten headers so the receiver can decode them
+# without knowing any payload parameters first.
 PRNG_HEADER = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00
 ]
 
 # Payload whitening for CR 3–4  (Hamming(7,4) and Hamming(8,4))
-# This is the sequence we need for CR = 4.
+# This is the sequence we need for our CR=4 pipeline.
+#
+# Notice the pattern: many entries are valid Hamming(8,4) codewords themselves
+# (e.g., 0xFF, 0x2D, 0x78, 0xE1, 0xD2, 0x55...). This is not a coincidence —
+# the PRNG was designed so that XORing with it preserves the Hamming distance
+# properties of the codewords, ensuring FEC still works correctly after
+# dewhitening.
 PRNG_PAYLOAD_CR78 = [
     0xff, 0xff, 0x2d, 0xff, 0x78, 0xff, 0xe1, 0xff,
     0x00, 0xff, 0xd2, 0x2d, 0x55, 0x78, 0x4b, 0xe1,
@@ -117,6 +222,8 @@ PRNG_PAYLOAD_CR78 = [
 
 # Payload whitening for CR 1–2  (Hamming(5,4) and Hamming(6,4))
 # Included for completeness; not used in our CR=4 pipeline.
+# Note: entries are only 6 bits wide (0x00–0x3F) since CR 1–2 codewords
+# are 5 or 6 bits, not the full 8 bits used in CR 3–4.
 PRNG_PAYLOAD_CR56 = [
     0xff, 0xff, 0x2d, 0xff, 0x78, 0xff, 0x30, 0x2e,
     0x0, 0x2e, 0x12, 0x3c, 0x14, 0x28, 0xa, 0x30,
@@ -199,6 +306,17 @@ def dewhiten(codewords: List[int], prng: List[int]) -> List[int]:
         for (i = 0; i < len; i++)
             d_words_dewhitened.push_back(d_words_deshuffled[i] ^ prng[i]);
 
+    The operation is trivially simple — just XOR — but its placement in the
+    pipeline matters. It MUST happen:
+      • AFTER deshuffling (Stage 5) — because the TX whitens first, then
+        shuffles. We undo in reverse order: deshuffle, then dewhiten.
+      • BEFORE Hamming decoding (Stage 7) — the Hamming parity bits were
+        computed on the original (pre-whitened) data, so we must remove
+        the whitening mask before the FEC can check/correct errors.
+
+    The & 0xFF mask ensures the result stays within 8 bits (defensive;
+    XOR of two bytes is always a byte, but Python ints are unbounded).
+
     Parameters
     ----------
     codewords : list of int
@@ -220,6 +338,11 @@ def dewhiten(codewords: List[int], prng: List[int]) -> List[int]:
 def select_payload_prng(cr: int) -> List[int]:
     """
     Return the correct payload whitening PRNG table for the given CR.
+
+    The coding rate determines the codeword width, and Semtech uses a
+    different PRNG sequence for each codeword width:
+      • CR 1–2 → 5- or 6-bit codewords → prng_payload_cr56
+      • CR 3–4 → 7- or 8-bit codewords → prng_payload_cr78
 
     gr-lora (decoder_impl.cc ~line 583):
         dewhiten(is_header ? prng_header :
@@ -256,19 +379,28 @@ def main():
 
     # ── Determine CR ──────────────────────────────────────────────────────
     #  The payload CR should come from the decoded header, but at this point
-    #  we haven't decoded the header yet.  Use the config value if available,
-    #  otherwise default to CR=4.
+    #  in the pipeline we haven't Hamming-decoded the header yet (that's
+    #  Stage 7). So we fall back to a config value or default to CR=4.
+    #
+    #  In a production decoder, the header would be fully decoded first to
+    #  extract the real CR, then the payload would be dewhitened with the
+    #  correct table. Our pipeline takes a shortcut since we know CR=4.
     cr = data.get('deinterleave', {}).get('config', {}).get('cr')
     if cr is None:
         cr = data.get('config', {}).get('cr', 4)
 
     # ── Dewhiten header ───────────────────────────────────────────────────
-    #  Header PRNG is all zeros → XOR is a no-op.  We apply it anyway for
-    #  correctness and to show the step in the trace.
+    #  Header PRNG is all zeros → XOR with zero is identity → no change.
+    #  We apply it anyway for correctness and to show the step in the trace.
+    #  This is NOT a bug — Semtech intentionally skips whitening on headers.
     header_dewhitened = dewhiten(header_cw, PRNG_HEADER)
 
     # ── Dewhiten payload ──────────────────────────────────────────────────
-    #  Select PRNG based on CR.  For CR 3–4, use prng_payload_cr78.
+    #  Select PRNG based on CR. For our CR=4 case, this picks prng_payload_cr78.
+    #
+    #  Remember from Stage 5: the 6th header codeword ("spillover") was
+    #  prepended to the payload stream. So payload_cw[0] is that spillover
+    #  codeword, and it gets XORed with prng_payload[0] = 0xFF.
     payload_prng = select_payload_prng(cr)
     payload_dewhitened = dewhiten(payload_cw, payload_prng)
 
